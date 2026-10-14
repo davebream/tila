@@ -728,7 +728,7 @@ secret values in the checklist or issue evidence.
 | Legacy full tokens | `GET /api/tokens` entries with `legacy:true` and `scopes:"full"` (runtime entries are also marked legacy by this listing; classify `runtime-v1` separately). Move each consumer to a named human/service scoped credential, test its intended operations, then `DELETE /api/tokens/:name`. A replacement service has an intentional new principal: transfer required memberships/room access and finish old claims/runs before retiring it. |
 | Scoped personal/service tokens | Same inventory, `legacy:false` (after selecting that project). Record `token_id`, `credential_id`, principal, policy and expiry. Preserve the consumer's proof key. Rotate after the pepper changes. Human-owned tokens are also visible at `GET /api/account/tokens?projectId=...`. |
 | Legacy browser/workspace sessions | Inventory clients still using `tila_session`. They must sign in through current human accounts; token-to-cookie exchange is retired. They do not automatically repair themselves after a pepper change. Retire their source credentials where applicable. |
-| Runtime installations, runs and pending invitations | `GET /projects/:projectId/runtime/enrollments` and `/runtime/runs`; operators also inventory their locally retained setup invitations. Drain runs, revoke old installations and issue new invitations. Pending old invitations cannot be redeemed under the new pepper. |
+| Runtime installations, runs and pending invitations | `GET /projects/:projectId/runtime/enrollments`, `/runtime/runs` and, as project owner, `/runtime/invitations`. The invitation listing returns each `invitation_id`, `state` (`pending`, `revoked`, `expired`), `expires_at` and `enrollments`, never the bearer value; record those fields, not a locally retained setup value. Drain runs and revoke old installations. A pending old invitation cannot be redeemed under the new pepper but is **not** revoked: see [rollback and re-application](#invitations-and-pepper-restoration). |
 | Workload exchanges | Inventory workload bindings and each CI/provider consumer. Obtain a fresh signed upstream assertion and re-exchange after cutover. Already exchanged assertions cannot be replayed, and workload credentials cannot use ordinary token rotation. |
 
 Human account passwords, `tila-account` sessions/device logins, account recovery
@@ -886,24 +886,60 @@ read the current inventory and reconcile; never blindly retry the old ID.
 |---|---|
 | Human-owned scoped token | Project owner rotation above, or a fresh human login using `POST /api/account/tokens/:name?projectId=...` with the same rotation body. |
 | Legacy browser session | Sign in through current human accounts. There is no background renewal guarantee for `tila_session`. |
-| Shared runtime installation | Revoke old enrollment with `POST /projects/:projectId/runtime/enrollments/:id/revoke` and `{}` (200). Issue `POST /projects/:projectId/runtime/invitations` with `{ "name": "host" }` and its reviewed `policy` (200); deliver `invitation` privately to normal runtime setup in a new isolated runtime home. Redeem with installation proof, then start a fresh run. Do not delete unrelated local runtime state. |
+| Shared runtime installation | Revoke old enrollment with `POST /projects/:projectId/runtime/enrollments/:id/revoke` and `{}` (200). Issue `POST /projects/:projectId/runtime/invitations` with `{ "name": "host" }` and its reviewed `policy` (200); record the returned `invitation_id` and `expires_at` (invitations last 10 minutes) and deliver `invitation` privately to normal runtime setup in a new isolated runtime home. Redeem with installation proof, then start a fresh run. Do not delete unrelated local runtime state. |
 | Personal runtime installation | Use its original authorized sponsor and retained installation proof/operation IDs to rerun the existing enrollment flow, where that authentication path supports it. Otherwise explicitly revoke and replace through an owner-issued shared invitation. Verify the replacement identity and its required bindings rather than silently treating it as the old run. |
 | Bound OIDC workload | Obtain a new provider assertion, then `POST /api/auth/oidc/exchange` with `project_id`, `oidc_token`, and the existing proof/runtime fields where applicable (200). Keep assertion material in a private request file. For GitHub Actions use the existing `/api/auth/github/exchange-oidc` flow. A replay returns 409; ordinary scoped rotation is not supported for these credentials. |
 
 New runtime installations can have new service principals and runs always have
 new participant authority. Restore their intended agent/room bindings explicitly;
-do not transfer stale claims or fenced writes. Pending old invitations remain
-stored until expiry: keep their values private and verify rejection under the new
-pepper. There is no public invitation-revocation endpoint; before restoring an old
-pepper, require all outstanding old invitations to have expired. An incomplete
-invitation inventory blocks that rollback. Existing scoped
-consumers retain their canonical principals through rotation.
+do not transfer stale claims or fenced writes. Existing scoped consumers retain
+their canonical principals through rotation.
+
+##### Invitations and pepper restoration
+
+An invitation is stored under a digest of its secret computed with the pepper in
+force when it was issued. Redemption recomputes the digest with the *current*
+pepper. Changing the pepper therefore makes every pending invitation fail with 403
+`invitation-invalid` while leaving it `pending`: it is neither revoked nor expired.
+Restoring that pepper makes it redeemable again, and the same is true of an
+invitation issued during the transition under the new pepper if that pepper is
+re-applied after a rollback. The Worker adds no guard against this; the local
+rehearsal observes both directions. A rejected redemption, an entry visible in the
+listing, or the absence of a retained setup value is **not** evidence of closure.
+Only a `revoked` or `expired` state is, and obtaining it is an operator
+prerequisite for every step that restores or re-applies a pepper:
+
+1. As project owner with a recent sign-in, list `GET /projects/:projectId/runtime/invitations`
+   for **every** project. D1 migration `0034` backfills the `invitation_id` this
+   listing and revocation depend on; apply it first.
+2. For each `pending` entry, revoke it with
+   `POST /projects/:projectId/runtime/invitations/:invitationId/revoke` and `{}`
+   (200 `revoked:true`; a repeat returns `revoked:false`, an unknown ID 404, a stale
+   session 403 `step-up-required`), or wait until after its `expires_at`. The CLI
+   equivalents are `tila machine invitations` and `tila machine revoke-invitation <id>`.
+3. List again. Every invitation issued before **or during** the cutover must show
+   `revoked` or `expired`. The re-read listing is the proof, not the revoke response.
+
+A `pending` entry, an unreadable listing, or an unrecorded invitation blocks the
+rollback or re-application. Revocation stops only later redemption: an enrollment
+already created from the invitation stays valid until it is revoked with
+`POST /projects/:projectId/runtime/enrollments/:enrollmentId/revoke`.
+
+##### Conversations stay independent of the pepper
+
+Enabling conversation routes needs only `CONVERSATION_CURSOR_KEY` and changes no
+credential hash. A credential migration needs `HASH_PEPPER` and this whole
+procedure. Neither is a prerequisite of the other, with one coupling:
+`HASH_PEPPER` is the cursor-signing fallback when no dedicated key exists.
 
 With a dedicated `CONVERSATION_CURSOR_KEY` held constant, send and read a message
 with authorized principals and verify existing history/cursors still work. If
 conversations previously derived their key from `HASH_PEPPER`, expect old cursors
-to fail with `invalid-cursor`; restart pagination. This procedure does not
-implicitly authorize enabling conversations on an unconfigured deployment.
+to fail with `invalid-cursor`; restart pagination. A dedicated key shorter than 32
+characters never falls back to the pepper. On a deployment with **neither** secret,
+setting `HASH_PEPPER` also supplies the fallback key, so conversation routes start
+answering instead of returning 503 `config-unavailable`. Treat that as a separate,
+explicitly authorized activation, or set the dedicated key first.
 
 Resume consumers individually only after their checks pass. Keep unavailable
 consumers paused with an assigned operator. `tila project create` on a peppered
@@ -914,12 +950,13 @@ procedure's recovery path for existing projects.
 
 | Interruption | Recovery and verification |
 |---|---|
-| Secret changed, no replacements issued | Use the independent human login or infrastructure owner recovery. Prefer continuing. If aborting, explicitly restore the old pepper (or delete `HASH_PEPPER` only if previously absent), then recheck every consumer and revocation. Never delete an existing prior pepper as a rollback shortcut. |
+| Secret changed, no replacements issued | Use the independent human login or infrastructure owner recovery. Prefer continuing. If aborting, first prove every invitation `revoked` or `expired` ([above](#invitations-and-pepper-restoration)), then explicitly restore the old pepper (or delete `HASH_PEPPER` only if previously absent), then recheck every consumer and revocation. Never delete an existing prior pepper as a rollback shortcut. |
 | Rotation returned but plaintext was lost | Inventory the current `token_id`, rotate that version again with zero overlap, and deliver the new plaintext once. The first result cannot be fetched or replayed. The old expected ID must return 409. |
 | Some consumers already replaced | Keep the new pepper and finish recovery. Removing it rejects new credentials. Restoring it does not undo rotation retirement or revocation; consumers can end up with no usable version under the old configuration. |
 | Runtime setup interrupted | Use setup's saved operation/proof state only when its authorization is still valid. Old pepper-hashed invitations cannot recover a shared enrollment under the new pepper; use the explicit replacement flow above. |
 
-For an approved abort before replacement, the explicit commands are
+For an approved abort before replacement, and only after the invitation listing
+shows nothing `pending`, the explicit commands are
 `wrangler secret put HASH_PEPPER --name <worker>` (supply the previous value), or
 `wrangler secret delete HASH_PEPPER --name <worker>` **only for a previously unset
 pepper**, through the same package-local Wrangler invocation above. Verify the
@@ -936,12 +973,25 @@ lost-response recovery, checks scoped authority/proof preservation, replaces
 runtime credentials, and verifies signed OIDC re-exchange. Only the external OIDC
 discovery/JWKS transport uses a fixture; authentication is not mocked. The suite
 also covers rollback, old-credential rejection and conversation send/read with an
-unchanged dedicated key. Run it with:
+unchanged dedicated key. A fifth case observes that pending invitations become
+redeemable again when a pepper is restored or re-applied, including those issued
+during the transition, while owner-revoked invitations stay unusable. It
+rehearses the [invitation prerequisite](#invitations-and-pepper-restoration); it
+is not a product guard. These are local Cloudflare runtime cases (workerd with
+local D1/DO/R2), never a deployed or live check. `packages/worker/src/version.ts`
+is generated and gitignored, so a fresh checkout must generate it first; the
+root `pnpm test:runtime` does so itself:
 
 ```bash
+node scripts/generate-version.mjs worker
+node scripts/generate-version.mjs sdk
 pnpm --filter @tila/integration-tests test:runtime hash-pepper-cutover
 pnpm test:runtime
 ```
+
+The sanitized audit of the last candidate run, with its source revision and the
+criteria that remain open, is
+[`evidence/issue-307-readiness-v1.json`](evidence/issue-307-readiness-v1.json).
 
 **Production activation: outstanding; this runbook and local rehearsal do not
 set/rotate any production secret.** Record the following separately for an
@@ -951,7 +1001,7 @@ explicitly authorized production execution:
 |---|---|
 | Identity | UTC date, operator, deployment/Worker, tested commit, deployed health release/commit and API compatibility |
 | Preparation | All-project inventory reviewed, legacy migration complete, recovery verified, consumers paused |
-| Cutover | Previous pepper state (unset/set only), owner login and principal/membership checks, replacement IDs and each consumer's protected-operation result |
+| Cutover | Previous pepper state (unset/set only), owner login and principal/membership checks, replacement IDs and each consumer's protected-operation result, and every project's invitation `state` (`revoked`/`expired` only) before any pepper is restored or re-applied |
 | Conversations | Authorized send/read, preserved history, cursor behavior, existing-principal access; health alone is insufficient |
 | Recovery/result | Rehearsal test command/results, interruption and rollback outcomes, unresolved consumers, resumed/paused status, explicit production performed/not-performed decision |
 
