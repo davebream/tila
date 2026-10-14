@@ -25,7 +25,7 @@
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
     "jose": "^6.2.12",
-    "smol-toml": "1.9.0",
+    "smol-toml": "1.9.1",
     "tila-cli": "workspace:*",
     "tila-mcp-server": "workspace:*",
     "tila-sdk": "workspace:*",

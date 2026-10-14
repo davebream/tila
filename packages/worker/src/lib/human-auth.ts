@@ -1,12 +1,17 @@
 import type { Context } from "hono";
-import { HumanStore, createHumanAuth, humanSecretHash } from "../d1";
+import {
+  type HumanAuth,
+  HumanStore,
+  createHumanAuth,
+  humanSecretHash,
+} from "../d1";
 import { stepUpMaxAgeMs } from "../middleware/protected-operation";
 import type { Env, HonoVariables } from "../types";
 import { parseAllowedOrigins } from "./parse-allowed-origins";
 
 export const HUMAN_BEARER_PREFIX = "tila_u_";
 type AccountContext = Context<{ Bindings: Env; Variables: HonoVariables }>;
-export async function accountAuth(c: AccountContext) {
+export async function accountAuth(c: AccountContext): Promise<HumanAuth> {
   const source = c.env.AUTH_SECRET ?? c.env.INFRA_ADMIN_TOKEN;
   if (!source)
     throw new Error(
