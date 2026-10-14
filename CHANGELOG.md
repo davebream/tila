@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Definition revision warnings (#416)
+
+- Accepted definition applies without `expected_revision` return structured `warnings` with code `schema-revision-deprecated`, guidance, and observed/result revisions. The SDK shows them through an injectable `warningSink` (default `console.warn`); CLI diagnostics go to stderr, including `--json`; MCP `tila_schema_update` includes them in text and structured output. Embedded/local applies have the same behavior.
+- A revisionless state change records `schema.revisionless_applied` in the same project SQLite transaction as the definition, history and receipt. It contains identity/provenance, idempotency context and revision numbers, without definition contents. Exact retries retain the warning without another revision/event; no-change warns without a state-change event. Rejected writes do not record a successful apply.
+
+### Upgrade notes
+
+- Upgrade the Worker to record warnings and journal events, then upgrade clients to display them. An older client may ignore the new response field; the project journal remains observable (`tila journal list --kind schema.revisionless_applied`). No database migration or product-version bump accompanies this change.
+- Current `tila schema apply` still permits revision omission; use `--expected-revision` from a reviewed diff or `--review`. CLI definition import, the dashboard definition editor/importer, and MCP `tila_schema_import` send reviewed revisions on apply. Direct SDK/API applies and MCP `tila_schema_update` still accept omission on non-managed projects and now warn. Preview, retain its `revision`/`reviewed_definition`, and submit them with a stable idempotency key; never substitute a newer revision on retry.
+- Supplied revisions retain HTTP 412 `schema-revision-conflict` behavior without a deprecation warning. Managed projects still require a revision, even for a cached legacy receipt. Requiring revisions everywhere is a future migration; no enforcement release or date is set.
+
 ## [0.8.0] - 2026-10-13
 
 ### Upgrade notes
