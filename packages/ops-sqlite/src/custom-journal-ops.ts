@@ -10,6 +10,8 @@ import {
   JournalAppendResponseSchema,
   JournalIdempotencyKeySchema,
   JournalReportedEventSchema,
+  PROJECT_ROLE_RANK,
+  type ProjectRole,
   canonicalJson,
   hasNamespaceRestrictions,
 } from "@tila/schemas";
@@ -113,6 +115,70 @@ function validateReferences(
   return resource;
 }
 
+type ReportedEvent = ReturnType<typeof JournalReportedEventSchema.parse>;
+
+/**
+ * Longest correction chain a reporter's authority is verified through. Every
+ * link can cost an archive read, and refusals are not metered, so the walk is
+ * bounded; maintainers and owners are not subject to it.
+ */
+export const CORRECTION_CHAIN_LIMIT = 256;
+
+/** The stored report at `seq`, or undefined when that event is not a report. */
+async function readReport(
+  db: ProjectDatabase,
+  seq: number,
+  archives: JournalArchiveReader | undefined,
+): Promise<ReportedEvent | undefined> {
+  const replay = await completeReplay(
+    replaySnapshot(db, { after_seq: seq - 1, through_seq: seq, limit: 1 }),
+    archives,
+  );
+  const report = JournalReportedEventSchema.safeParse(replay.events[0]);
+  return report.success ? report.data : undefined;
+}
+
+/**
+ * A report may be corrected by its original reporter or by a maintainer/owner.
+ * The original reporter is the principal of the first event in the chain, so a
+ * correction, including a maintainer's, never transfers authorship. Authority
+ * that depends on history fails closed when any link is missing or invalid.
+ */
+async function assertCorrectionAuthority(
+  db: ProjectDatabase,
+  target: ReportedEvent,
+  caller: { principalId: string; role: ProjectRole },
+  archives: JournalArchiveReader | undefined,
+): Promise<void> {
+  if (PROJECT_ROLE_RANK[caller.role] >= PROJECT_ROLE_RANK.maintainer) return;
+  let root = target;
+  for (let links = 0; root.data.corrects_seq !== undefined; links++) {
+    if (links >= CORRECTION_CHAIN_LIMIT)
+      throw new JournalReportError(
+        "report-correction-denied",
+        "This correction chain is too long to verify; a project maintainer or owner can correct it",
+        403,
+      );
+    const earlier = root.data.corrects_seq;
+    // Sequences are allocated in order, so a link must point strictly back.
+    const previous =
+      earlier < root.seq ? await readReport(db, earlier, archives) : undefined;
+    if (!previous)
+      throw new JournalReportError(
+        "journal-history-unavailable",
+        `Correction chain is broken at sequence ${earlier}`,
+        503,
+      );
+    root = previous;
+  }
+  if (!root.principal_id || root.principal_id !== caller.principalId)
+    throw new JournalReportError(
+      "report-correction-denied",
+      "Only the original reporter or a project maintainer or owner can correct a report",
+      403,
+    );
+}
+
 export function cleanupJournalReports(
   db: ProjectDatabase,
   now = Date.now(),
@@ -137,6 +203,12 @@ export async function appendReport(
     origin: RequestOrigin;
     input: JournalAppendRequest;
     idempotencyKey: string;
+    /**
+     * The caller's project role as resolved by the Worker for this request.
+     * It is never read from the request body, and a credential ceiling in
+     * `policy` can only lower it.
+     */
+    authorizedRole: ProjectRole;
     policy?: CredentialPolicy;
     archives?: JournalArchiveReader;
     /** Recheck the transfer lock after asynchronous archive/hash work. */
@@ -148,7 +220,7 @@ export async function appendReport(
   const idempotencyKey = JournalIdempotencyKeySchema.parse(
     options.idempotencyKey,
   );
-  const { origin, projectId, policy } = options;
+  const { origin, projectId, policy, authorizedRole } = options;
   if (!origin.principalId || !origin.participantId)
     throw new JournalReportError(
       "participant-required",
@@ -167,21 +239,28 @@ export async function appendReport(
         "validation-error",
         "Correction sequence must identify an earlier report",
       );
-    const replay = await completeReplay(
-      replaySnapshot(db, {
-        after_seq: input.corrects_seq - 1,
-        through_seq: input.corrects_seq,
-        limit: 1,
-      }),
-      options.archives,
-    );
-    const previous = JournalReportedEventSchema.safeParse(replay.events[0]);
-    if (!previous.success)
+    const target = await readReport(db, input.corrects_seq, options.archives);
+    if (!target)
       throw new JournalReportError(
         "validation-error",
         "Corrections must reference an earlier custom report",
       );
-    correction = previous.data.data;
+    // Decided before any receipt, rate counter or event is written, and again
+    // on every retry: a refusal leaves no trace.
+    await assertCorrectionAuthority(
+      db,
+      target,
+      {
+        principalId: origin.principalId,
+        role:
+          policy &&
+          PROJECT_ROLE_RANK[policy.role] < PROJECT_ROLE_RANK[authorizedRole]
+            ? policy.role
+            : authorizedRole,
+      },
+      options.archives,
+    );
+    correction = target.data;
   }
   const digest = await crypto.subtle.digest(
     "SHA-256",

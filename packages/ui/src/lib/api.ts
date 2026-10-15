@@ -85,6 +85,7 @@ import type {
   EntityArtifactReferenceListResponse,
   EntityDetailResponse,
   EntityListResponse,
+  JournalReplayResponse,
   JournalResponse,
   PaginatedEntityListResponse,
   PresenceAllListResponse,
@@ -273,7 +274,8 @@ async function request<T>(
       headers: {
         Accept: "application/json",
         ...(conversation ? { "X-Tila-Conversation-Protocol": "1" } : {}),
-        ...(/^\/(queue|attempts|questions)(\/|$)/.test(path)
+        // Participant-scoped reads: replay refuses a request without one.
+        ...(/^\/(queue|attempts|questions|journal\/replay)(\/|$)/.test(path)
           ? { "X-Tila-Participant-Id": dashboardParticipantId() }
           : {}),
       },
@@ -473,6 +475,34 @@ export async function listJournal(
     stringParams.after_seq = String(params.after_seq);
   if (params?.limit !== undefined) stringParams.limit = String(params.limit);
   return request<JournalResponse>(projectId, "/journal", stringParams);
+}
+
+/**
+ * One window of journal history, oldest first, with archived rows included.
+ * Replay reads forward from `after_seq`, so a caller pages backwards by asking
+ * for `(after_seq, through_seq]` windows below what it already holds.
+ * `limit` is at most 200 and caps the sequences in the window.
+ *
+ * Unlike `listJournal` this takes no filters: the caller filters what it gets.
+ * Needs the read permission and the participant header, and answers
+ * `journal-history-unavailable` (503) when archived rows cannot be read in
+ * full, and `invalid-cursor` (400) when the window lies outside the journal.
+ */
+export async function replayJournal(
+  projectId: string,
+  params: { after_seq: number; through_seq?: number; limit?: number },
+): Promise<JournalReplayResponse> {
+  const stringParams: Record<string, string | undefined> = {
+    after_seq: String(params.after_seq),
+  };
+  if (params.through_seq !== undefined)
+    stringParams.through_seq = String(params.through_seq);
+  if (params.limit !== undefined) stringParams.limit = String(params.limit);
+  return request<JournalReplayResponse>(
+    projectId,
+    "/journal/replay",
+    stringParams,
+  );
 }
 
 export async function appendJournalReport(

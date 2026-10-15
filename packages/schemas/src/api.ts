@@ -1824,6 +1824,44 @@ export const RecordMutateResponseSchema = z.object({
 
 export type RecordMutateResponse = z.infer<typeof RecordMutateResponseSchema>;
 
+/**
+ * What `create`, `set` and `put` return to a credential that may write a
+ * record but not read it (a split policy whose `records_read` side does not
+ * admit the key). The stored row holds state the caller never sent, so none of
+ * it, nor anything derived from it, is returned: the receipt names the record
+ * the caller addressed and carries the fence a later fenced write needs.
+ */
+export const RecordWriteReceiptResponseSchema = z.object({
+  ok: z.literal(true),
+  /** Always `true`; absent from a full response, so the two cannot be confused. */
+  receipt: z.literal(true),
+  type: RecordTypeSchema,
+  key: RecordKeySchema,
+  fence: z.number().int(),
+});
+
+export type RecordWriteReceiptResponse = z.infer<
+  typeof RecordWriteReceiptResponseSchema
+>;
+
+/**
+ * `create` / `set` / `put` response: the full record for a caller that may
+ * read it (unchanged for every legacy policy), or a receipt for one that may
+ * only write it. Discriminate with {@link isRecordWriteReceipt}.
+ */
+export const RecordWriteResponseSchema = z.union([
+  RecordMutateResponseSchema,
+  RecordWriteReceiptResponseSchema,
+]);
+
+export type RecordWriteResponse = z.infer<typeof RecordWriteResponseSchema>;
+
+export function isRecordWriteReceipt(
+  response: RecordWriteResponse,
+): response is RecordWriteReceiptResponse {
+  return "receipt" in response && response.receipt === true;
+}
+
 export const RecordListItemSchema = z.object({
   type: RecordTypeSchema,
   key: RecordKeySchema,

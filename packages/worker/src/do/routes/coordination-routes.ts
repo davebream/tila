@@ -152,7 +152,8 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     const claims = coordinationOps.listClaims(db).filter((claim) => {
       if (!policy || !hasNamespaceRestrictions(policy)) return true;
       try {
-        assertResourceAccess(db, policy, claim.resource);
+        // Listing claims reveals which resources are held: a read.
+        assertResourceAccess(db, policy, claim.resource, "read");
         return true;
       } catch (error) {
         if (error instanceof CredentialPolicyDenied) return false;

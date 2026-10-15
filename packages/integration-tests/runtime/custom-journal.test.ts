@@ -286,3 +286,195 @@ it("checks claim owner and fence through HTTP without changing task or claim sta
   ).toBe(409);
   expect(await (await http("/tasks/owned")).json()).toEqual(before);
 });
+
+it("limits report corrections to the reporter and maintainers across principals, live and archived", async () => {
+  const { project, http } = await queueApiFixture();
+  const store = new CredentialStore(bindings.DB);
+  const actor = { principalId: "fixture" };
+  async function principal(name: string, role: "participant" | "maintainer") {
+    const service = await store.createService(
+      project,
+      { name, display_name: name, role },
+      actor,
+    );
+    const token = `tila_${crypto.randomUUID()}${crypto.randomUUID()}`;
+    await store.issue(
+      {
+        projectId: project,
+        principalId: service.principal_id,
+        name,
+        tokenHash: await hashToken(token, bindings.HASH_PEPPER),
+        policy: {
+          role,
+          capabilities: ["journal:append", "journal:read"],
+        },
+      },
+      actor,
+    );
+    return {
+      id: service.principal_id,
+      send: (body: unknown, key: string) =>
+        SELF.fetch(`https://worker/projects/${project}/journal`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "X-Tila-Participant-Id": name,
+            "Idempotency-Key": key,
+          },
+          body: JSON.stringify(body),
+        }),
+    };
+  }
+  const reporter = await principal("reporter", "participant");
+  const other = await principal("other", "participant");
+  const maintainer = await principal("maintainer", "maintainer");
+  const accepted = async (response: Response) => {
+    expect(response.status, await response.clone().text()).toBe(200);
+    return (await response.json()) as {
+      event: { seq: number; principal_id: string };
+    };
+  };
+  const count = async () =>
+    (
+      (await (await http("/journal?kind=custom.reported")).json()) as {
+        events: unknown[];
+      }
+    ).events.length;
+
+  const root = await accepted(await reporter.send(input, "root"));
+  expect(await count()).toBe(1);
+
+  // An unrelated participant with journal:append and journal:read is refused.
+  for (const key of ["first", "again"]) {
+    const refused = await other.send(
+      { ...input, corrects_seq: root.event.seq, data: { passed: 1 } },
+      key,
+    );
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({
+      ok: false,
+      error: { code: "report-correction-denied", retryable: false },
+    });
+  }
+  expect(await count()).toBe(1);
+
+  // A forged identity or role field never reaches authority.
+  for (const forged of [{ role: "owner" }, { principal_id: reporter.id }]) {
+    const response = await other.send(
+      { ...input, corrects_seq: root.event.seq, ...forged },
+      "forged",
+    );
+    expect(response.status).toBe(400);
+  }
+
+  // A maintainer corrects, recording itself, and the reporter keeps authority.
+  const byMaintainer = await accepted(
+    await maintainer.send(
+      { ...input, corrects_seq: root.event.seq, data: { passed: 2 } },
+      "maintainer",
+    ),
+  );
+  expect(byMaintainer.event.principal_id).toBe(maintainer.id);
+  const replay = await maintainer.send(
+    { ...input, corrects_seq: root.event.seq, data: { passed: 2 } },
+    "maintainer",
+  );
+  expect(replay.headers.get("Idempotency-Replayed")).toBe("true");
+  expect((await replay.json()) as unknown).toEqual(byMaintainer);
+  expect(await count()).toBe(2);
+  expect(
+    (
+      await other.send(
+        { ...input, corrects_seq: byMaintainer.event.seq },
+        "other-maintainer",
+      )
+    ).status,
+  ).toBe(403);
+  const byReporter = await accepted(
+    await reporter.send(
+      { ...input, corrects_seq: byMaintainer.event.seq, data: { passed: 3 } },
+      "reporter-over-maintainer",
+    ),
+  );
+  expect(byReporter.event.principal_id).toBe(reporter.id);
+
+  // Archive everything so far: lineage is read from R2 and decides identically.
+  const stub = bindings.PROJECT.get(bindings.PROJECT.idFromName(project));
+  const rows = await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql.exec("SELECT * FROM journal ORDER BY seq").toArray(),
+  );
+  const key = `journal-archive/${project}/corrections.jsonl`;
+  await bindings.ARTIFACTS.put(
+    key,
+    rows
+      .map((row) =>
+        JSON.stringify({
+          ...row,
+          data: JSON.parse(String(row.data)),
+          environment: JSON.parse(String(row.environment)),
+        }),
+      )
+      .join("\n"),
+    {
+      customMetadata: {
+        first_seq: "1",
+        last_seq: String(byReporter.event.seq),
+      },
+    },
+  );
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec("DELETE FROM journal");
+    state.storage.sql.exec(
+      "INSERT OR REPLACE INTO _journal_archive_watermark (id, last_archived_seq, archived_at) VALUES (1, ?, ?)",
+      byReporter.event.seq,
+      Date.now(),
+    );
+  });
+  expect(
+    (
+      await other.send(
+        { ...input, corrects_seq: root.event.seq },
+        "archived-other",
+      )
+    ).status,
+  ).toBe(403);
+  const archivedFix = await accepted(
+    await reporter.send(
+      { ...input, corrects_seq: byMaintainer.event.seq, data: { passed: 4 } },
+      "archived-reporter",
+    ),
+  );
+  expect(archivedFix.event.principal_id).toBe(reporter.id);
+  await accepted(
+    await maintainer.send(
+      { ...input, corrects_seq: root.event.seq, data: { passed: 5 } },
+      "archived-maintainer",
+    ),
+  );
+
+  // Unreadable history fails closed for everyone who depends on it.
+  await bindings.ARTIFACTS.delete(key);
+  const before = await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec("SELECT count(*) AS n FROM journal_report_receipts")
+      .toArray(),
+  );
+  for (const who of [reporter, other]) {
+    const response = await who.send(
+      { ...input, corrects_seq: byMaintainer.event.seq },
+      `unreadable-${who.id}`,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "journal-history-unavailable" },
+    });
+  }
+  expect(
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec("SELECT count(*) AS n FROM journal_report_receipts")
+        .toArray(),
+    ),
+  ).toEqual(before);
+});

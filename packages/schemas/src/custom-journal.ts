@@ -132,6 +132,7 @@ export const JournalAppendErrorCodeSchema = z.enum([
   "no-fence",
   "idempotency-key-conflict",
   "rate-limited",
+  "report-correction-denied",
   "journal-history-unavailable",
   "unsupported-capability",
 ]);

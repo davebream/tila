@@ -20,6 +20,10 @@ export function queueQueryFromSearch(params: URLSearchParams): QueueListQuery {
   return {
     limit: 100,
     offset: Math.max(0, Number(params.get("offset")) || 0),
+    // Rows and counts read only the title/name and lifecycle state of a task;
+    // opening a row loads the full task. Other queue readers (task detail)
+    // build their own query and keep the full view.
+    compact: true,
     // An unknown state reaches the server, which rejects it visibly.
     ...(state ? { state: state as QueueListQuery["state"] } : {}),
     ...(lease ? { lease: lease as QueueListQuery["lease"] } : {}),

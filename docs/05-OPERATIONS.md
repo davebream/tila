@@ -1944,6 +1944,8 @@ expiry and legacy status. `GET /api/tokens` also returns logical/version IDs, po
 effective policy, status, expiry and version retirement deadlines, without secrets.
 
 Absent namespace restrictions mean unrestricted; empty arrays grant nothing.
+Record rules can also limit reading and writing separately, as described under
+[Record read and write restrictions](#record-read-and-write-restrictions-530).
 Task types match exactly. Record prefix `team/a` permits that key and descendants
 such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
 pagination, so a restricted listing that is empty cannot be told apart from one
@@ -1961,6 +1963,53 @@ require explicit delete capabilities. A service promotion cannot expand a key's
 issuance ceiling; demotions and revocations immediately reduce current authority.
 To remove what an automated run created without widening its key, see
 [Cleaning up automated run resources](#cleaning-up-automated-run-resources-362).
+
+### Record read and write restrictions (#530)
+
+`restrictions.records` keeps its meaning: one rule list that applies to reading
+and writing alike. To give a key different reach on each side, use
+`records_read` and `records_write` instead, with the same rule shape
+(`{"type": ..., "key_prefixes": [...]}`):
+
+```sh
+# Reads answer/a1/..., writes question/q1/... and nothing else.
+tila token issue --name worker --principal 'service:<uuid>' --role participant \
+  --capabilities records:read,records:write,claims:read,claims:acquire,claims:renew,claims:release \
+  --restrictions '{"records_read":[{"type":"answer","key_prefixes":["a1"]}],"records_write":[{"type":"question","key_prefixes":["q1"]}]}' --json
+```
+
+- `records` cannot be combined with `records_read` or `records_write`; a policy
+  that does is rejected when it is issued, stored or imported.
+- As soon as either split field is present, the side that is not listed denies
+  every record. `"records_read": []` and a missing `records_read` both read
+  nothing.
+- A policy that sets only one side is still a restricted credential: it is
+  limited to the same surfaces as any other namespace restriction.
+- Reading covers `GET /records/:type/:key`, `~/history`, listing and counts,
+  the record catalog, record search and claim state or listing. Writing covers
+  create, set, put, patch, archive, unarchive and acquiring, renewing or
+  releasing a claim on `record:<type>/<key>`.
+- The catalog (`GET /records/_types`) lists only the types a credential may
+  read, so a write-only credential sees none. Search and claim listings omit
+  everything the read side does not admit.
+- A write must not tell the caller what it could not have read. Patch, archive
+  and unarchive return the stored record, so they also need the read side of the
+  same key. Create, set and put from a credential that may write but not read
+  the key return a receipt (`ok`, `receipt: true`, `type`, `key`, `fence`) and
+  nothing else: no value, tags, archived flag, timestamps, author or revision.
+  The fence is what a later fenced write needs. A stale fence reports only that
+  the fence is stale, and an undeclared record type does not list the project's
+  other types. Whether a key exists is still visible to a writer, because create
+  conflicts and set needs an existing record.
+- Delegation and narrowing treat the sides independently: a derived credential,
+  session, run ceiling, workload binding or imported policy can never read or
+  write more than its parent on either side.
+
+Upgrade note: policies that use `records_read` or `records_write` cannot be
+parsed by a Worker from before this change, because policy objects are strict.
+That Worker rejects them and the credential has no access; it does not fall back
+to broader access. Deploy the Worker before issuing such credentials, and
+reissue them as `records` policies if you roll back.
 
 ### Expiry, rotation and revocation
 
@@ -3287,6 +3336,13 @@ can record verified observations, rebind the same recorded execution, or force
 recovery with a reason. Force recovery records unresolved external execution;
 it does not kill a process.
 
+The page and the Overview's queue counts request the compact listing
+(`compact=true`), so rows carry each task's title/name and lifecycle state rather
+than its full data, and opening a row loads the whole task. Compact lowers the
+bytes sent, not the Durable Object's work: it still reads the full readiness
+snapshot for every request. Use `tila queue inspect --data '{"compact":true}'
+--json` for the same view from scripts; omit `compact` for the full task data.
+
 Actions follow current role and credential capabilities. When permission queries
 are unavailable, the queue remains visible but actions are disabled. Failed
 refreshes show the last known state with a stale notice. Revision conflicts retain
@@ -3446,12 +3502,24 @@ directly; MCP returns it in structured output.
 | Lost response | Retry identical input with the same key within seven days; current authority must still be valid |
 | `idempotency-key-conflict` (422) | Inspect the original submission; do not change input under a previously used key |
 | `validation-error` (400), `payload-too-large` (413) | Correct the contract or move evidence to artifacts; no report was accepted |
+| `report-correction-denied` (403, `retryable: false`) | Only the report's original reporter or a project maintainer/owner may set `corrects_seq`; nothing was recorded. Send a new report without `corrects_seq`, or ask a maintainer to correct it. The same request will not succeed on retry |
+| `journal-history-unavailable` (503) on a correction | The history needed to establish the original reporter could not be read; nothing was recorded. Retry after archive access recovers. If it persists with `retryable: false` a link of the chain is damaged; a maintainer or owner can still correct the report |
 | `rate-limited` (429) | Wait for `Retry-After`, then retry with the same key |
 
 Limits are 60 new reports per principal per UTC minute and 300 per project per
 UTC minute, across credentials and participants. Identical accepted retries do
 not consume additional quota. Failed writes roll back their counters and receipt.
 Expired receipts/counters are cleaned on append and during the daily sweep.
+
+Correcting a report (`corrects_seq`) is limited to the original reporter's
+principal and to project maintainers and owners; the original reporter stays
+authoritative through a chain, so a maintainer's correction does not transfer
+authorship. The CLI/API token and a dashboard session are different principals:
+a person who reported with one cannot correct as the other unless their role is
+maintainer or owner. Corrections other participants recorded earlier remain in
+history; consumers that treat the latest correction as authoritative should read
+each correction's `principal_id`. A chain of more than 256 corrections can be
+extended only by a maintainer or owner.
 
 Authorization failures, missing participants, missing references, and stale
 claims/fences never append a report. The worker credential preset now includes

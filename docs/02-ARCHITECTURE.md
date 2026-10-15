@@ -2934,6 +2934,48 @@ destructive confirmation, fed by an archive preview.
 | Project display name and identity metadata; `settings_revision` | D1 registry; `GET/PATCH /projects/:id/project-settings`; SDK `project`, CLI `project settings/rename` | O (`project:configure`) for rename; root for destructive project operations / I | Settings → General (delivered). Rename is revision-checked and audited, and display only. IDs, creation time/actor and account binding are read-only provenance; archive/destroy remain explicit operational actions. |
 | Agent profile selection: `profile_id`, optional `host_ref` (enrollment) and `account_ref` | DO, on the agent (`profile_selection`, covered by the agent revision); `PATCH /agents/:id`; CLI `agent update --profile/--profile-host/--profile-account/--clear-profile`; MCP `tila_agent_update` | M for the selection; runtime attach still B / H | Settings → Agents, configured policy (delivered). A new attach must report the selected profile, account and enrollment, or it fails with `profile-mismatch`; an attached run's renewal is unaffected. A selection does not rewrite binding evidence, verify an account or grant credentials. Changing a host's local profile has no supported command (#283) and is shown as unavailable, never as success. |
 
+#### Record read and write restrictions (#530)
+
+Namespace restrictions gain a split form for records. `records` stays one rule
+list that applies to both sides. `records_read` and `records_write` are
+independent lists with the same rule shape; the two forms are mutually
+exclusive, an absent side denies every record once either field is present, and
+an empty list denies every record on its side. `hasNamespaceRestrictions`, the
+catalog, the search `restricted` flag and the DO `restricted` scope flag all see
+every field, so a policy that sets only one side is still a restricted
+credential.
+
+Enforcement uses the side of the operation, enumerated per route rather than
+inferred from the verb. `GET` and `HEAD` read, the listed create, replace, put,
+patch, archive, unarchive and claim routes write, and any other method or route
+is denied.
+
+| Operation | Side | Worker (`capabilityMiddleware`) | DO (`assertCredentialRequest`) |
+|---|---|---|---|
+| `GET/HEAD /records/:type/:key`, `~/history/:key` | read | key against `records_read` | same |
+| `GET /records/:type`, `GET /records/_types`, record search | read | passed through | rows, counts, types and catalog filtered by the read side |
+| `POST /records/:type`, `PUT /records/:type/:key`, `POST ~/put/:key` | write | key against `records_write` | same; response is a receipt when the read side does not admit the key |
+| `PATCH /records/:type/:key`, `POST ~/archive/:key`, `POST ~/unarchive/:key` | write and read | both sides for the same key | same (these return the stored record) |
+| `stamp-artifacts` (follow-up of a snapshot write) | write | not routed | write side |
+| claim acquire, renew, release on `record:<type>/<key>` | write | key against `records_write` | same |
+| claim state, claim listing on `record:<type>/<key>` | read | state checked, listing passed through | state checked; listing filtered by the read side |
+
+Containment (`policyContains`) and narrowing (`intersectCredentialPolicies`)
+work per side. Narrowing emits the legacy single list when both sides end up
+equal, so a policy that never used the split fields narrows to exactly what it
+always did. List cursors carry only a position; the current credential's read
+side is applied to every page, so a cursor cannot widen what another policy
+may see.
+
+The write response for `create`, `set` and `put` is a full record for any
+credential whose policy is not split (unchanged). For a split policy it is the
+full record only when the credential holds `records:read` and its read side
+admits the key; otherwise it is the receipt `{ ok, receipt: true, type, key,
+fence }`. The receipt is explicit in the API schema (`RecordWriteResponse`), the
+SDK (`isRecordWriteReceipt`) and the MCP result schemas, so clients narrow on it
+rather than finding fields missing. The stale-fence message and the
+undeclared-type message are likewise limited for such a caller.
+
 #### Client, host and deployment boundary — explained exclusions
 
 | Field group / authority | Current surface | Boundary and management path |
@@ -3723,6 +3765,32 @@ Scheduling capabilities are declared compatibility metadata, not authorization.
 A valid denial (`no_grant`: disabled, paused, empty, blocked or capacity exhausted)
 is distinct from transport failure and conflict errors.
 
+**Compact inspection.** `compact` is an additive boolean on queue inspection
+(`GET /queue?compact=true`, `tila queue inspect --data '{"compact":true}'`,
+`tila_queue` `inspect` with `query.compact`, and `queue.inspect({ compact: true })`
+in the SDK, local and remote). Absent or `false`, the response is the full one,
+byte for byte as before; HTTP accepts only the literals `true` and `false` and
+answers `400 validation-error` for anything else (`compact=1`, `compact=`).
+With `true`, only `task` changes: it is `{ id, type, data }` without the
+task's stored metadata (timestamps, creator, archive flag), and `data` holds
+just `title`, `name` and the type's declared lifecycle state field, each only
+if present and with its stored value.
+Entries, attempts, block reasons, counts, policy, diagnostics, ordering,
+paging and resource restrictions are those of the full listing, so a
+restricted credential never receives more than it does without `compact`.
+The Queue page and the Overview's queue counts request it; opening a row loads
+the full task, and other readers (the task page, SDK consumers that read
+`task.data`) keep requesting the full shape.
+
+Compact reduces response bytes, not server work: the Durable Object still
+reads the full readiness snapshot to evaluate every entry. The saving depends
+on how much a task carries beyond its title, because the entry, attempt and
+block reasons are not narrowed (about 0.65 KB per entry). On a 100-task
+fixture, uncompressed: with about 5 KB of task content each, which matches the
+roughly 575 KB response observed in issue #525, the listing falls from about
+583 KB to 67 KB (8.7x); with 2 KB of content, from 283 KB to 67 KB (4.2x),
+under 5x; with 1 KB, 2.7x.
+
 The CLI accepts operation JSON through `--data` or `--file`, including stable
 idempotency keys. For example:
 
@@ -3845,6 +3913,43 @@ Optional `corrects_seq` is a positive safe integer referencing an earlier custom
 report. Corrections validate live or archived history and current reference
 access, then append another event. Existing history is immutable.
 
+Correction authority. A correction is accepted only from the original reporter
+of the report it corrects, or from a project maintainer or owner:
+
+- The original reporter is the `principal_id` of the first report in the chain:
+  the event reached by following `corrects_seq` until an event has none. The
+  comparison is on principal only, never on participant, `actor`, or a request
+  field, and a correction event records its own corrector's `principal_id`. A
+  correction, including a maintainer's, does not change the chain's original
+  reporter. The original reporter can therefore correct any later correction,
+  and a maintainer who corrected once gains no standing over the chain beyond
+  their role.
+- The role is the effective project role the Worker resolved for the request:
+  current membership, lowered by any credential ceiling, with mirrored GitHub
+  maintainer authority re-verified as for other maintainer operations. It is
+  never taken from the request; unknown identity or role fields are rejected as
+  unknown contract fields. A role that cannot be verified counts as participant.
+- Anyone else, including a participant holding `journal:append` and
+  `journal:read`, receives `403 report-correction-denied` with
+  `retryable: false`. A refusal writes no event, receipt, or rate count and
+  is the same on every retry. The remedy is a new report without `corrects_seq`,
+  or a maintainer's correction.
+- The original reporter is established by reading the chain, live or archived,
+  before anything is written. A link that is missing, unreadable, not a report,
+  or not pointing to an earlier event fails with `journal-history-unavailable`
+  (503) and writes nothing. At most 256 links are followed; a longer chain can
+  be extended only by a maintainer or owner, and other callers receive
+  `report-correction-denied`.
+- A maintainer or owner needs only the report being corrected. They do not read
+  the rest of the chain, so the 256-link bound and damage further back do not
+  apply to them.
+- Authority is evaluated on every attempt, including a retry of an accepted
+  correction, and before the receipt is consulted.
+- Identity is the authenticated principal. A CLI or API token and a dashboard
+  session are different principals even for the same person, so a report sent
+  with one can be corrected by the other only through a maintainer or owner role.
+  Corrections recorded before this rule stay in history unchanged.
+
 Append requires current project write authority, an explicit participant, and
 `journal:append`. Linked references additionally require their read capabilities;
 claim-bound reports require `claims:read`, and corrections require `journal:read`.
@@ -3858,8 +3963,8 @@ partial expression indexes for custom event name and correlation. The event,
 receipt, and counters commit in one project SQLite transaction. D1 response replay
 is bypassed. Keys are scoped to project, principal, and participant; credential
 rotation does not reset them. Canonical JSON hashing ignores object-key order.
-Current permissions, reference access, and claim authority are rechecked even on
-retry. An authorized identical retry returns the original event and attribution;
+Current permissions, reference access, claim authority, and correction authority
+are rechecked even on retry. An authorized identical retry returns the original event and attribution;
 a changed request with the same key fails with `idempotency-key-conflict` (422).
 
 The response is `{ "ok": true, "event": {...}, "dedup_expires_at": <Unix ms> }`.

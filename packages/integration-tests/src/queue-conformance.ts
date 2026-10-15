@@ -10,7 +10,8 @@ export const queueConformanceDefinition = lifecycleDefinition.replace(
 export interface QueueFixture {
   queue: QueueBackend;
   attempts: AttemptBackend;
-  createTask(id: string): Promise<unknown>;
+  /** Creates an `issue`; `data` is merged over `{ phase: "todo" }`. */
+  createTask(id: string, data?: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
 }
 const key = () => ({ idempotency_key: crypto.randomUUID() });
@@ -87,6 +88,78 @@ export function queueConformance(
           (await queue.inspect()).diagnostics?.grant_denials.execution_capacity,
         ).toBe(1);
         expect(await attempts.list()).toHaveLength(2);
+      },
+    );
+    scenario(
+      "lists a compact view that narrows task data only, and the full view by default",
+      async ({ queue, attempts, createTask }) => {
+        await queue.configure({
+          ...key(),
+          expected_revision: 0,
+          enabled: true,
+          paused: false,
+          execution_limit: 1,
+        });
+        const brief = "A long task brief. ".repeat(100);
+        for (const id of ["first", "second", "third"]) {
+          await createTask(id, {
+            title: `Title of ${id}`,
+            name: `name-${id}`,
+            description: brief,
+            acceptance: ["compiles", "tests pass"],
+          });
+          await queue.enroll({ ...key(), task_id: id });
+        }
+        const grant = granted(await queue.claimNext(key()));
+        // Wall-clock readings differ between two inspections of one state.
+        const stable = (
+          view: Awaited<ReturnType<QueueBackend["inspect"]>>,
+        ) => ({
+          ...view,
+          diagnostics: undefined,
+          counts: { ...view.counts, oldest_waiting_age_ms: null },
+        });
+        const full = await queue.inspect();
+        const explicit = await queue.inspect({ compact: false });
+        const compact = await queue.inspect({ compact: true });
+        expect(full.entries).toHaveLength(3);
+        expect(stable(explicit)).toEqual(stable(full));
+        for (const view of full.entries) {
+          expect(view.task?.data).toMatchObject({
+            description: brief,
+            acceptance: ["compiles", "tests pass"],
+          });
+        }
+        expect(compact.entries.map((view) => view.task)).toEqual(
+          full.entries.map((view) => ({
+            id: view.entry.task_id,
+            type: "issue",
+            data: {
+              phase: "todo",
+              title: `Title of ${view.entry.task_id}`,
+              name: `name-${view.entry.task_id}`,
+            },
+          })),
+        );
+        // Everything but task.data is the full listing's, attempts included.
+        expect(
+          stable({
+            ...compact,
+            entries: compact.entries.map((view, index) => ({
+              ...view,
+              task: full.entries[index].task,
+            })),
+          }),
+        ).toEqual(stable(full));
+        expect(
+          compact.entries.find((view) => view.entry.task_id === grant.task_id)
+            ?.attempt?.id,
+        ).toBe(grant.id);
+        expect(
+          (await queue.inspect({ compact: true, state: "backlog", limit: 1 }))
+            .entries,
+        ).toHaveLength(1);
+        expect(await attempts.list()).toHaveLength(1);
       },
     );
     scenario(

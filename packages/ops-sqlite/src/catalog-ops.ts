@@ -20,7 +20,9 @@ import {
   type TypeDeclaration,
   type WorkCatalogEntry,
   type WorkUnit,
+  hasRecordRestrictions,
   permitsTask,
+  recordRulesForSide,
 } from "@tila/schemas";
 
 /** What the caller could learn about the current schema. */
@@ -59,7 +61,7 @@ function catalogFields(
 function hasRestrictions(restrictions?: NamespaceRestrictions): boolean {
   return (
     restrictions?.task_types !== undefined ||
-    restrictions?.records !== undefined
+    hasRecordRestrictions(restrictions)
   );
 }
 
@@ -145,15 +147,18 @@ export function buildWorkCatalog(
 }
 
 /**
- * A record type is permitted when the caller is unrestricted for records, or
- * holds a rule for the type that is not narrowed to zero key prefixes.
+ * A record type is listed when the caller is unrestricted for records, or its
+ * read side holds a rule for the type that is not narrowed to zero key
+ * prefixes. The catalog only ever shows what the caller may read; a type that
+ * is writable but not readable is not listed.
  */
 export function permitsRecordType(
   restrictions: NamespaceRestrictions | undefined,
   type: string,
 ): boolean {
-  if (restrictions?.records === undefined) return true;
-  return restrictions.records.some(
+  const rules = recordRulesForSide(restrictions, "read");
+  if (rules === undefined) return true;
+  return rules.some(
     (rule) =>
       rule.type === type &&
       (rule.key_prefixes === undefined || rule.key_prefixes.length > 0),
@@ -169,7 +174,7 @@ export function buildRecordCatalog(
     input,
     declared,
     (type) => permitsRecordType(input.restrictions, type),
-    input.restrictions?.records !== undefined,
+    hasRecordRestrictions(input.restrictions),
     (type, declaration, count, definition) => ({
       type,
       declaration,

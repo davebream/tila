@@ -5,8 +5,8 @@ export function addSecurityHeaders(headers: Headers, nonce?: string): void {
     // The membership panel resolves a GitHub login to its numeric user id from
     // the browser via GitHub's public, CORS-enabled users endpoint (#102).
     "connect-src 'self' https://api.github.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",

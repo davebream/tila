@@ -8,6 +8,7 @@ import {
   listJournal,
   listTasks,
   mutate,
+  replayJournal,
   revokeMembership,
   searchTasks,
   sessionStatus,
@@ -352,4 +353,103 @@ describe("session migration status", () => {
     );
     expect(await sessionStatus()).toEqual(expected);
   });
+});
+
+describe("replayJournal", () => {
+  test("requests an explicit window and carries the participant header", async () => {
+    let request: Request | undefined;
+    server.use(
+      http.get("*/projects/*/journal/replay", ({ request: incoming }) => {
+        request = incoming;
+        return HttpResponse.json({
+          ok: true,
+          events: [],
+          next_after_seq: 150,
+          through_seq: 150,
+          has_more: false,
+        });
+      }),
+    );
+
+    const page = await replayJournal("p1", {
+      after_seq: 0,
+      through_seq: 150,
+      limit: 150,
+    });
+
+    const url = new URL(request?.url ?? "");
+    expect(url.pathname).toBe("/projects/p1/journal/replay");
+    // after_seq 0 is a real bound (the first window), not an absent param.
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      after_seq: "0",
+      through_seq: "150",
+      limit: "150",
+    });
+    expect(request?.headers.get("X-Tila-Participant-Id")).toBeTruthy();
+    expect(page.has_more).toBe(false);
+  });
+
+  test("sends only the bounds it was given", async () => {
+    let params: URLSearchParams | undefined;
+    server.use(
+      http.get("*/projects/*/journal/replay", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({
+          ok: true,
+          events: [],
+          next_after_seq: 7,
+          through_seq: 7,
+          has_more: false,
+        });
+      }),
+    );
+    await replayJournal("p1", { after_seq: 7 });
+    expect(Object.fromEntries(params ?? [])).toEqual({ after_seq: "7" });
+  });
+
+  test.each([
+    {
+      status: 503,
+      code: "journal-history-unavailable",
+      message: "Unable to read complete journal archives",
+    },
+    {
+      status: 400,
+      code: "invalid-cursor",
+      message: "Replay bounds must satisfy after_seq <= through_seq",
+    },
+    {
+      status: 403,
+      code: "permission-denied",
+      message: "Credential does not permit this operation or resource",
+    },
+  ])(
+    "surfaces $code ($status) as an ApiError with the server's code",
+    async (failure) => {
+      server.use(
+        http.get("*/projects/*/journal/replay", () =>
+          HttpResponse.json(
+            {
+              ok: false,
+              error: {
+                code: failure.code,
+                message: failure.message,
+                retryable: failure.status === 503,
+              },
+            },
+            { status: failure.status },
+          ),
+        ),
+      );
+      const error = await replayJournal("p1", { after_seq: 0 }).catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({
+        code: failure.code,
+        status: failure.status,
+        message: failure.message,
+      });
+    },
+  );
 });
