@@ -140,3 +140,70 @@ The following are explicitly out of scope for v0.1:
 - **Semantic search:** FTS5 is lexical only — it matches exact terms and prefixes. Embedding-based or semantic similarity search is not available.
 - **Global search:** Search is scoped to a single project. Cross-project search is not available.
 - **URL-persistent search state:** The UI search bar state is ephemeral. Search queries are not reflected in the URL hash.
+
+## Journal report search
+
+Unified search includes `custom.reported` events as `kind=report` / result
+`type: "report"`. It indexes `event_name`, `correlation_id`, and string values
+at every depth of the report's payload (including arrays). Object keys,
+numbers, booleans, identity/provenance fields, and referenced artifact contents
+are not indexed. Originals and corrections are separate immutable results;
+search does not choose an authoritative correction.
+
+Reports require both `search:read` and `journal:read`. Namespace-restricted
+credentials cannot search reports, matching journal visibility for free-form
+report text. An explicitly unauthorized kind returns 403; implicit searches
+omit it and explain the omission in `scope.excluded_kinds`. Reports have no
+tags and therefore never match a nonempty `tag_filter`.
+
+```sh
+tila search 'deployment' --kind report --limit 20 --json
+tila search 'deployment' --kind report --cursor '<next_cursor>' --json
+tila search reindex --kind report
+```
+
+The SDK accepts `search.search(q, { kind: ["report"], cursor })`; MCP
+`tila_search` accepts `kind` and `cursor`. Report results include `seq`, `t`,
+`resource`, `principal_id`, `event_name`, nullable `correlation_id` and
+`corrects_seq`, `snippet`, and `indexed_at`. Fetch the original event with
+journal replay using `after_seq=seq-1&through_seq=seq`. Ranking and cursor drift
+follow unified search's existing rules; backfill can change ranking between
+pages. Snippets contain highlight markup and caller-authored text: consumers
+must sanitize before rendering HTML.
+
+New reports are indexed in their append transaction. Their search documents
+survive journal archival. Existing history is backfilled on first report
+search in verified windows of at most 1,000 journal sequences. Cloudflare
+continues through alarms; local SDK/CLI searches advance one window per call,
+and local report reindex drains the remaining windows.
+
+`scope.report_history` explicitly describes coverage when reports are searched:
+
+| Field | Meaning |
+|---|---|
+| `archived: "included"` | The report index includes archived history |
+| `status` | `pending`, `running`, `complete`, or `failed` |
+| `indexed_through_seq` | Historical prefix verified and indexed |
+| `target_through_seq` | Fixed historical upper bound for this indexing run |
+| `error` | Failure code, present when indexing failed |
+
+Partial results remain available during indexing or failure. An empty partial
+page does not establish that no matching report exists. New reports above the
+fixed historical target are already indexed synchronously. The existing
+`scope.archived: "excluded"` continues to describe archived tasks and records,
+not journal report archives.
+
+A missing or conflicting archive stops progress before that window. Repair the
+archive, then run report reindex to resume; reindexing a complete index starts a
+fresh historical verification without clearing existing results. Worker storage
+failures receive up to five retries with exponential backoff. Status is available
+at `GET /projects/:id/search/reindex/status?kind=report`; explicit reindex uses
+`POST /projects/:id/search/reindex` with `{"kind":"report"}` and requires the
+existing administrative/reindex permissions plus report visibility.
+
+Migration 44 adds report search documents, FTS5, and progress state in both
+Cloudflare and embedded databases. It does not read R2 during migration. Backup
+and transfer include documents and progress; restore rebuilds FTS, and old
+backups start with incomplete coverage. Archival preserves indexed report text
+in SQLite; project destruction removes it. A restored running job is scheduled
+on the next report search.
