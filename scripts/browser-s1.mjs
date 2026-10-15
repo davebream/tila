@@ -25,6 +25,7 @@ import { StringDecoder } from "node:string_decoder";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   findForbiddenDefinitionContent,
+  parseDefinitionDocument,
   parseSchemaToml,
   serializeDefinitionDocument,
 } from "@tila/core";
@@ -860,6 +861,422 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       assert.deepEqual(external, [], "browser attempted external access");
       assert.deepEqual(errors, [], "browser page errors");
       record(step, { persisted_revision: 4, history: [4, 3, 2, 1] });
+
+      // Independent literals: never derive the expected merge from the import planner.
+      const d4 = `schema_version = 1
+
+[work_units.task]
+fields = [{ name = "title", type = "string", required = true }]
+
+[work_units.bug]
+
+[artifacts.api_plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+
+[records.browser_note]
+`;
+      const d5 = `schema_version = 1
+
+[work_units.task]
+fields = [{ name = "title", type = "string", required = true }]
+
+[work_units.bug]
+fields = []
+
+[artifacts.api_plan]
+mime_types = ["text/markdown"]
+retention_days = 7
+
+[records.browser_note]
+
+[records.ui_survivor]
+format = "json"
+`;
+      const d6 = `schema_version = 1
+
+[work_units.task]
+fields = [{ name = "title", type = "string", required = true }]
+
+[work_units.bug]
+fields = []
+
+[artifacts.api_plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+
+[records.browser_note]
+
+[records.ui_survivor]
+format = "json"
+`;
+      const sha256 = (value) =>
+        createHash("sha256").update(value).digest("hex");
+      function document(source) {
+        const read = parseDefinitionDocument(source);
+        assert.equal(read.ok, true, "raw definition must parse");
+        return read.doc;
+      }
+      function exactDefinition(source, expected) {
+        assert.deepEqual(document(source), document(expected));
+        assert.deepEqual(parsed(source), parsed(expected));
+        assert.equal(Object.hasOwn(document(source), "tila_export"), false);
+        for (const secret of secrets)
+          assert.equal(source.includes(secret), false);
+      }
+      async function persisted(revision, expected) {
+        const state = await current();
+        assert.equal(state.revision, revision);
+        exactDefinition(state.schema.definition, expected);
+        assert.deepEqual(
+          await historyVersions(),
+          Array.from({ length: revision }, (_, i) => revision - i),
+        );
+        return state;
+      }
+      const schemaResponse = (path) =>
+        page.waitForResponse(
+          (response) =>
+            response.url() === `${api}${path}` &&
+            response.request().method() === "POST",
+        );
+      async function previewAfter(action) {
+        const [response] = await Promise.all([
+          schemaResponse(`${schemaPath}/preview`),
+          action(),
+        ]);
+        assert.equal(response.status(), 200);
+        const preview = await response.json();
+        assert.equal(preview.ok, true);
+        return preview;
+      }
+      function retentionPreview(preview, revision, from, to, expected) {
+        assert.equal(preview.revision, revision);
+        assert.equal(preview.autoApplicable, false);
+        exactDefinition(preview.reviewed_definition, expected);
+        const change = preview.changes.find(
+          (change) => change.path === "artifacts.api_plan",
+        );
+        assert.equal(change.kind, "definition-changed");
+        assert.equal(change.destructive, true);
+        assert.equal(change.impact.liveArtifacts, 0);
+        assert.equal(change.impact.retention.from, from);
+        assert.equal(change.impact.retention.to, to);
+        assert.equal(change.impact.retention.pendingBackfill, 0);
+      }
+      const confirmation = () =>
+        page.getByRole("dialog", {
+          name: "Apply destructive definition changes?",
+          exact: true,
+        });
+      async function confirmApply(revision, preview, expected) {
+        const dialog = confirmation();
+        await dialog.waitFor();
+        const confirm = dialog.getByRole("button", {
+          name: "Apply changes",
+          exact: true,
+        });
+        assert.equal(await confirm.isEnabled(), false);
+        await dialog
+          .getByLabel(`Type ${project} to confirm`, { exact: true })
+          .fill(project);
+        const before = schemaPosts;
+        const [response] = await Promise.all([
+          schemaResponse(schemaPath),
+          confirm.click(),
+        ]);
+        assert.equal(response.status(), 200);
+        assert.equal((await response.json()).ok, true);
+        assert.equal(schemaPosts, before + 1);
+        const request = response.request();
+        const body = request.postDataJSON();
+        assert.deepEqual(Object.keys(body).sort(), [
+          "definition",
+          "expected_revision",
+          "reviewed_definition",
+          "strategy",
+        ]);
+        assert.equal(body.expected_revision, revision - 1);
+        assert.equal(body.strategy, "relax");
+        assert.equal(body.reviewed_definition, preview.reviewed_definition);
+        exactDefinition(body.definition, expected);
+        assert.ok(request.headers()["idempotency-key"]?.trim());
+        await page
+          .getByText(`Applied as revision ${revision}.`, { exact: true })
+          .waitFor();
+        await at();
+      }
+      let phaseStarted = performance.now();
+      function importRecord(details) {
+        record(step, {
+          phase_duration_ms: performance.now() - phaseStarted,
+          ...details,
+        });
+        phaseStarted = performance.now();
+      }
+
+      step = "freeze revision 4 browser export and projected partial file";
+      await persisted(4, d4);
+      const [download4] = await Promise.all([
+        page.waitForEvent("download"),
+        page
+          .getByRole("button", { name: "Download TOML", exact: true })
+          .click(),
+      ]);
+      assert.equal(
+        download4.suggestedFilename(),
+        `${project}-definitions-r4.toml`,
+      );
+      const stream4 = await download4.createReadStream();
+      assert.ok(stream4);
+      const chunks4 = [];
+      let bytes4 = 0;
+      for await (const chunk of stream4) {
+        bytes4 += chunk.length;
+        assert.ok(bytes4 <= 1_000_000);
+        chunks4.push(chunk);
+      }
+      const export4 = Buffer.concat(chunks4).toString("utf8");
+      const read4 = readDefinitionFile(export4, { format: "toml" });
+      assert.equal(read4.ok, true);
+      assert.equal(read4.metadata.format, "tila-definitions");
+      assert.equal(read4.metadata.format_version, 1);
+      assert.equal(read4.metadata.project_id, project);
+      assert.equal(read4.metadata.revision, 4);
+      exactDefinition(serializeDefinitionDocument(read4.doc), d4);
+      assert.deepEqual(findForbiddenDefinitionContent(read4.doc), []);
+      for (const secret of secrets)
+        assert.equal(export4.includes(secret), false);
+      // A deliberately projected fixture, not an unmodified complete download.
+      const partial = `[tila_export]
+format = "tila-definitions"
+format_version = 1
+project_id = "browser-s1"
+revision = 4
+
+[artifacts.api_plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+`;
+      const partialFile = {
+        name: "stale-artifact-r4.toml",
+        mimeType: "text/plain",
+        buffer: Buffer.from(partial),
+      };
+      importRecord({
+        export_sha256: sha256(export4),
+        projected_partial_sha256: sha256(partial),
+        definition_sha256: sha256(d4),
+      });
+
+      step =
+        "browser revision 5 shortens retention and adds an omitted survivor";
+      const postsAt4 = schemaPosts;
+      await page
+        .getByRole("link", { name: "Edit source", exact: true })
+        .click();
+      await at("/source");
+      await page.getByLabel("Draft (TOML)", { exact: true }).fill(d5);
+      const preview5 = await previewAfter(() =>
+        page.getByRole("link", { name: "Review changes", exact: true }).click(),
+      );
+      await at("/review");
+      retentionPreview(preview5, 4, 30, 7, d5);
+      assert.equal(preview5.changes.length, 2);
+      assert.ok(
+        preview5.changes.some(
+          (change) =>
+            change.kind === "record-type-added" &&
+            change.typeName === "ui_survivor",
+        ),
+      );
+      await page
+        .getByText(
+          "Retention 30 days → 7 days. 0 live artifacts keep the expiry they already have; new artifacts use the new value.",
+          { exact: true },
+        )
+        .waitFor();
+      await page
+        .getByText("Add record type ui_survivor", { exact: true })
+        .waitFor();
+      assert.equal(schemaPosts, postsAt4);
+      await page
+        .getByRole("button", { name: "Apply as revision 5", exact: true })
+        .click();
+      await confirmApply(5, preview5, d5);
+      assert.equal(schemaPosts, postsAt4 + 1);
+      const revision5 = await persisted(5, d5);
+      const history5 = (await request(`${schemaPath}/history`)).entries;
+      importRecord({
+        persisted_revision: 5,
+        schema_posts: schemaPosts,
+        definition_sha256: sha256(d5),
+      });
+
+      step = "changed stale partial import review leaves revision 5 unchanged";
+      const postsBeforeImport = schemaPosts;
+      await page
+        .getByRole("link", { name: "Import a file", exact: true })
+        .click();
+      await at("/import");
+      assert.equal(
+        await page.getByRole("radio", { name: /^Merge/ }).isChecked(),
+        true,
+      );
+      await page
+        .getByLabel("File (.toml, .yaml or .yml)", { exact: true })
+        .setInputFiles(partialFile);
+      const preview6 = await previewAfter(() =>
+        page
+          .getByRole("button", {
+            name: "Load into draft and review",
+            exact: true,
+          })
+          .click(),
+      );
+      await at("/review");
+      retentionPreview(preview6, 5, 7, 30, d6);
+      assert.equal(preview6.changes.length, 1);
+      const summary = page.getByRole("region", {
+        name: "Imported file",
+        exact: true,
+      });
+      await summary.waitFor();
+      const summaryText = await summary.textContent();
+      assert.ok(summaryText.includes("stale-artifact-r4.toml"));
+      assert.ok(summaryText.includes("onto revision 5"));
+      assert.ok(
+        summaryText.includes(
+          "This file was exported from revision 4; the project is at revision 5. Importing it reverts the declarations it contains that changed since then.",
+        ),
+      );
+      assert.ok(summaryText.includes("Changed (1)artifacts.api_plan"));
+      assert.equal(/Added|Removed/.test(summaryText), false);
+      assert.ok(
+        summaryText.includes(
+          "Kept as applied, including everything the file doesn't mention.",
+        ),
+      );
+      await page
+        .getByText(
+          "Retention 7 days → 30 days. 0 live artifacts keep the expiry they already have; new artifacts use the new value.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(schemaPosts, postsBeforeImport);
+      assert.deepEqual(await persisted(5, d5), revision5);
+      assert.deepEqual(
+        (await request(`${schemaPath}/history`)).entries,
+        history5,
+      );
+      importRecord({
+        persisted_revision: 5,
+        schema_posts: schemaPosts,
+        preview_revision: preview6.revision,
+      });
+
+      step = "cancel destructive import without a write or history append";
+      await page
+        .getByRole("button", { name: "Apply as revision 6", exact: true })
+        .click();
+      await confirmation().waitFor();
+      assert.equal(
+        await confirmation()
+          .getByRole("button", { name: "Apply changes", exact: true })
+          .isEnabled(),
+        false,
+      );
+      await confirmation()
+        .getByRole("button", { name: "Cancel", exact: true })
+        .click();
+      await confirmation().waitFor({ state: "hidden" });
+      assert.equal(await summary.textContent(), summaryText);
+      assert.equal(schemaPosts, postsBeforeImport);
+      assert.deepEqual(await persisted(5, d5), revision5);
+      assert.deepEqual(
+        (await request(`${schemaPath}/history`)).entries,
+        history5,
+      );
+      importRecord({ persisted_revision: 5, schema_posts: schemaPosts });
+
+      step =
+        "explicit reviewed import applies revision 6 and retains omitted declarations";
+      await page
+        .getByRole("button", { name: "Apply as revision 6", exact: true })
+        .click();
+      await confirmApply(6, preview6, d6);
+      assert.equal(schemaPosts, postsBeforeImport + 1);
+      await persisted(6, d6);
+      const history6 = (await request(`${schemaPath}/history`)).entries;
+      assert.deepEqual(history6.slice(1), history5);
+      assert.ok(history6[0].applied_by);
+      assert.equal(history6[0].applied_by, history5[0].applied_by);
+      assert.equal(history6[0].applied_by, history.entries[0].applied_by);
+      assert.equal(history6[0].strategy, "relax");
+      exactDefinition(history6[0].definition, d6);
+      await page.getByRole("link", { name: "Revision 6", exact: true }).click();
+      await at("/history/6");
+      await page
+        .getByRole("heading", { name: "Revision 6", exact: true })
+        .waitFor();
+      await page
+        .getByText(
+          new RegExp(
+            `by ${history6[0].applied_by.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · relax$`,
+          ),
+        )
+        .waitFor();
+      await page.getByText("Revision 6 source (TOML)", { exact: true }).click();
+      const source6 = page.locator("details").filter({
+        has: page.locator("summary", {
+          hasText: /^Revision 6 source \(TOML\)$/,
+        }),
+      });
+      exactDefinition(await source6.locator("pre").textContent(), d6);
+      await page.screenshot({
+        path: resolve(evidence, "changed-import-history-r6.png"),
+        fullPage: true,
+      });
+      importRecord({
+        persisted_revision: 6,
+        history: [6, 5, 4, 3, 2, 1],
+        schema_posts: schemaPosts,
+        actor_matches_owner_history: true,
+        strategy: "relax",
+        definition_sha256: sha256(d6),
+      });
+
+      step = "identical stale partial reupload is a revision 6 no-op";
+      await page.goto(`${base}/import`);
+      await at("/import");
+      await page
+        .getByLabel("File (.toml, .yaml or .yml)", { exact: true })
+        .setInputFiles(partialFile);
+      await page
+        .getByRole("button", {
+          name: "Load into draft and review",
+          exact: true,
+        })
+        .click();
+      await page
+        .getByText("The file matches revision 6; there is nothing to import.", {
+          exact: true,
+        })
+        .waitFor();
+      assert.equal(schemaPosts, postsBeforeImport + 1);
+      await persisted(6, d6);
+      assert.deepEqual(
+        (await request(`${schemaPath}/history`)).entries,
+        history6,
+      );
+      assert.deepEqual(external, [], "browser attempted external access");
+      assert.deepEqual(errors, [], "browser page errors");
+      importRecord({
+        persisted_revision: 6,
+        history: [6, 5, 4, 3, 2, 1],
+        schema_posts: schemaPosts,
+        projected_partial_sha256: sha256(partial),
+      });
     })();
     await Promise.race([externalFailure, runFailure, scenario]);
   } finally {
@@ -978,7 +1395,8 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
     resolve(evidence, "result.json"),
     JSON.stringify(
       {
-        scope: "partial local browser S1; no live/native/S2/S3 acceptance",
+        scope:
+          "partial local browser S1: definitions, revision conflicts and changed stale partial import; no live/native/S2/S3 acceptance",
         observations,
         external,
         blocked_optional_fonts: blockedOptionalFonts,

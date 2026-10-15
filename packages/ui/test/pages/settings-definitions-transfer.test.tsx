@@ -185,6 +185,116 @@ describe("definition import", () => {
     expect(String(applies[0].body.definition)).not.toContain("bug");
   });
 
+  test("a changed stale partial file keeps omitted declarations and requires reviewed confirmation", async () => {
+    const user = userEvent.setup();
+    const current = `${TASK_AND_BUG.replace("retention_days = 30", "retention_days = 7")}
+[records.ui_survivor]
+format = "json"
+`;
+    const expected = `${TASK_AND_BUG}
+[records.ui_survivor]
+format = "json"
+`;
+    appliedAt({ revision: 5, source: current });
+    const previews = previewAt(
+      () => 5,
+      () => ({
+        autoApplicable: false,
+        changes: [
+          {
+            kind: "definition-changed",
+            path: "artifacts.plan",
+            destructive: true,
+            impact: {
+              liveArtifacts: 0,
+              searchChanged: false,
+              retention: { from: 7, to: 30, pendingBackfill: 0 },
+            },
+          },
+        ],
+      }),
+    );
+    const applies = applyWith(ok(6));
+    render("/import");
+    await user.upload(
+      await screen.findByLabelText("File (.toml, .yaml or .yml)"),
+      new File(
+        [
+          `[tila_export]
+format = "tila-definitions"
+format_version = 1
+project_id = "test-project"
+revision = 4
+
+[artifacts.plan]
+mime_types = ["text/markdown"]
+retention_days = 30
+`,
+        ],
+        "stale-artifact-r4.toml",
+        { type: "text/plain" },
+      ),
+    );
+    expect(screen.getByRole("radio", { name: /Merge/ })).toBeChecked();
+    await load(user);
+    const summary = await screen.findByRole("region", {
+      name: "Imported file",
+    });
+    expect(summary).toHaveTextContent("onto revision 5");
+    expect(summary).toHaveTextContent(
+      "exported from revision 4; the project is at revision 5",
+    );
+    expect(summary).toHaveTextContent("Changed (1)artifacts.plan");
+    expect(summary).not.toHaveTextContent(/Added|Removed/);
+    expect(summary).toHaveTextContent(
+      "Kept as applied, including everything the file doesn't mention.",
+    );
+    expect(
+      await screen.findByText(/Retention 7 days → 30 days. 0 live artifacts/),
+    ).toBeInTheDocument();
+    expect(applies).toHaveLength(0);
+
+    await user.click(
+      screen.getByRole("button", { name: "Apply as revision 6" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Apply destructive definition changes?",
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Apply changes" }),
+    ).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(applies).toHaveLength(0);
+    expect(summary).toBeInTheDocument();
+    expect(semantic(previews.at(-1))).toBe(semantic(expected));
+
+    await user.click(
+      screen.getByRole("button", { name: "Apply as revision 6" }),
+    );
+    const again = await screen.findByRole("dialog");
+    await user.type(
+      within(again).getByLabelText("Type test-project to confirm"),
+      "test-project",
+    );
+    await user.click(
+      within(again).getByRole("button", { name: "Apply changes" }),
+    );
+    await screen.findByText("Applied as revision 6.");
+    expect(applies).toHaveLength(1);
+    expect(applies[0].key).toBeTruthy();
+    expect(applies[0].body).toEqual({
+      definition: previews.at(-1),
+      expected_revision: 5,
+      reviewed_definition: previews.at(-1),
+      strategy: "relax",
+    });
+    expect(semantic(applies[0].body.definition)).toBe(semantic(expected));
+    expect(applies[0].body.definition).not.toContain("tila_export");
+  });
+
   test("a concurrent change makes the import conflict and keeps the draft", async () => {
     const user = userEvent.setup();
     const state = { revision: 3, source: TASK };
