@@ -412,37 +412,52 @@ export interface SessionTokenResult {
 
 Cookie sessions enable browser UI login without exposing long-lived tokens to JavaScript.
 
-### Session Exchange Flow
+### Retired token exchange
 
 **Route:** `POST /auth/session`  
-**File:** `packages/worker/src/routes/auth-session.ts` lines 51-196
+**File:** `packages/worker/src/routes/auth-session.ts` (`authSessionExchange`)
 
-**Pre-auth:** This endpoint does NOT require the auth middleware. It accepts a D1 API token in the request body and exchanges it for an HttpOnly session cookie.
+**Pre-auth:** This endpoint does NOT require the auth middleware. Since 0.5.0 it no longer exchanges an API token for a browser session. The handler reads no request body, validates no credential, creates no session, and never sets a cookie: every `POST` is answered with `410 Gone`.
 
-**Request:**
-```json
-{
-  "token": "tila_abc123...",
-  "project_id": "proj_xyz"
-}
-```
+**Request:** Any body is ignored. The earlier `{ "token": "...", "project_id": "..." }` shape has no effect.
 
 **Response:**
 ```
-HTTP/1.1 200 OK
-Set-Cookie: tila_session=<UUID>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=28800
-{"ok": true}
+HTTP/1.1 410 Gone
+{
+  "ok": false,
+  "error": {
+    "code": "token-login-retired",
+    "message": "API tokens cannot create browser sessions. Sign in with an account that has project membership, ...",
+    "retryable": false
+  }
+}
 ```
 
-**Flow:**
+`message` is guidance for people and may be reworded, so clients should match on `error.code`. It names the supported replacements: an account with project membership, an invitation from an administrator, `tila auth setup` for the first administrator, and `tila login` for CLI access.
 
-1. Parse and validate request body against `SessionExchangeRequestSchema` (lines 99-110)
-2. Hash token and validate against D1 via `D1TokenStore.validate()` (lines 117-142)
-3. Verify token belongs to requested `project_id` (lines 145-157)
-4. Generate session UUID (`crypto.randomUUID()`)
-5. Hash session UUID (same `hashToken()` as bearer tokens)
-6. Create D1 session record via `D1SessionStore.create()` (lines 166-174)
-7. Set HttpOnly cookie with 8-hour `Max-Age` (lines 190-193)
+### Account sign-in
+
+Browser sessions are created by account sign-in, not by an API token. Accounts are invitation-only, sign in with email and password independently of GitHub, and reach a project only through a canonical project membership. Bootstrap, invitations, recovery and CLI login are described in [Human accounts, invitations, and CLI login](05-OPERATIONS.md#human-accounts-invitations-and-cli-login).
+
+**Routes:** `packages/worker/src/routes/accounts.ts`, mounted at `/api/account` in `packages/worker/src/index.ts`. They are mounted outside `createAuthMiddleware()` and check the account session themselves where one is required.
+
+| Route | Credential | Purpose |
+|---|---|---|
+| `GET /api/account/config` | none | Reports which sign-in methods are enabled (`emailPassword`, `github`, `emailDelivery`) |
+| `POST /api/account/auth/sign-in/email` | none | Email/password sign-in; sets the account session cookie |
+| `POST /api/account/auth/sign-in/social`, `GET /api/account/auth/callback/github` | none | GitHub sign-in; requires `GITHUB_LOGIN_ENABLED=true` and OAuth credentials (see [GitHub browser login](05-OPERATIONS.md#github-browser-login-explicit-opt-in)) |
+| `POST /api/account/auth/device/code`, `POST /api/account/auth/device/token` | none | CLI device flow behind `tila login`; the user approves the code in the browser |
+| `POST /api/account/handoff` | CLI device login | Issues the single-use browser link behind `tila open`; the browser redeems it at `POST /api/account/auth/handoff/consume` |
+| `POST /api/account/auth/sign-out` | account session | Ends the account session |
+| `GET /api/account/me` | account session | Current user and sessions |
+| `POST /api/account/setup` | infrastructure owner | Creates the first administrator's invitation (`tila auth setup`) |
+
+An account request carries the `tila-account.session_token` cookie (optionally `__Secure-` prefixed) or, from the CLI device flow, `Authorization: Bearer tila_u_<token>`. `createAuthMiddleware()` checks for an account credential before the legacy `tila_session` cookie and bearer paths (`authenticateHuman`, `packages/worker/src/middleware/human-auth.ts`). Membership is resolved on every request: with a membership in the target project the result is a `cookie-session` carrying that role; otherwise it is a `workspace-session` with no project.
+
+### Legacy token-derived cookies
+
+Cookies minted by the exchange before 0.5.0 keep their original expiry and revocation checks. A legacy cookie whose source is a bootstrap API token and whose principal has no project membership is answered with `401 account-migration-required` instead of being granted access, and an account sign-in takes precedence over an accompanying legacy cookie. Recovery steps are in [Recovering a legacy bootstrap browser login](05-OPERATIONS.md#recovering-a-legacy-bootstrap-browser-login-328).
 
 ### D1 Session Store
 
@@ -453,7 +468,7 @@ Session records are stored in the `_sessions` table (D1 global database):
 export const sessions = sqliteTable("_sessions", {
   session_hash: text("session_hash").primaryKey(),
   project_id: text("project_id").notNull(),
-  token_hash: text("token_hash").notNull(),  // References originating D1 token
+  token_hash: text("token_hash").notNull(),  // "" for GitHub-callback and project-select sessions; legacy exchange sessions hold the source D1 token's hash
   actor_name: text("actor_name").notNull(),
   scopes: text("scopes").notNull().default("full"),
   created_at: integer("created_at").notNull(),
@@ -599,14 +614,16 @@ window. A cookie session whose `authenticatedAt` is older than
 ```
 
 `authenticated_at` is stored in `_sessions.authenticated_at` (migration 0028). It
-is set when the GitHub OAuth callback or `POST /auth/session` creates a session and
+is set when the GitHub OAuth callback creates a session and
 is **carried unchanged** when `POST /api/workspace/select` or `/deselect` replaces
 the session row, so selecting a project does not restart the clock. Rows created
 before the migration fall back to `created_at`; a cookie session with no value at
-all is treated as stale.
+all is treated as stale. Account sessions take the value from the account
+session's own `authenticatedAt`: the time of email sign-in or the GitHub
+callback, or the approval time for a CLI device login.
 
-Exempt: D1 bearer tokens, scoped credentials (including cookie sessions exchanged
-from one, which carry `policy`), and GitHub/OIDC JWT sessions. They cannot
+Exempt: D1 bearer tokens, scoped credentials (including legacy cookie sessions
+minted from one before the token exchange was retired, which carry `policy`), and GitHub/OIDC JWT sessions. They cannot
 re-authenticate interactively; their protection is the explicit-owner/capability
 gate. GET requests are never gated.
 
@@ -707,8 +724,8 @@ Route-level permission gate (`packages/worker/src/middleware/permission.ts` line
 - Example: `requirePermission("write")` passes if `permission` is "write", "maintain", or "admin"
 
 **For cookie sessions:**
-- Inherit `scopes` from originating D1 token (lines 63-79)
-- Currently all cookie sessions have `scopes: "full"` (inherited from the token used in exchange)
+- Authorized like other session kinds, from the current project role resolved from membership; the stored `scopes` and `permission` are snapshots, not the authority
+- Account sessions with a project membership carry `scopes: "full"`; project-select sessions carry `"read"` when the role maps to read permission and `"full"` otherwise; legacy sessions minted by the retired token exchange inherited the source token's scopes
 
 ### CSRF Guard
 
@@ -733,7 +750,8 @@ Routes that do NOT require authentication:
 
 - `/api` health check (line 81)
 - `/api/auth/github` GitHub exchange endpoint (line 84)
-- `/auth/session` session exchange endpoint (line 87)
+- `/auth/session` retired token exchange; always answers `410 token-login-retired` (see §4)
+- `/api/account` account sign-in, invitation, recovery and setup routes; routes that need an account session check it themselves (see §4)
 
 ### Auth-Protected Sub-Apps
 
@@ -1155,7 +1173,7 @@ Cookie-authenticated mutation requests require matching `Origin` header (lines 1
 **Cookie sessions:**
 - Explicit revocation via `POST /auth/session/logout` (hard-delete from D1)
 - Cache invalidation: `invalidateSession(sessionHash)` (line 217 in `auth-session.ts`)
-- Cascade deletion: When a D1 token is revoked, all derived cookie sessions are deleted via `D1SessionStore.deleteByTokenHash()` (lines 74-80 in `session-store.ts`)
+- Cascade deletion: When a D1 token is revoked, cookie sessions that still reference it are deleted via `D1SessionStore.deleteByTokenHash()` (lines 74-80 in `session-store.ts`). Only legacy sessions minted by the retired token exchange hold a token hash; GitHub-callback and project-select sessions store an empty one
 
 **GitHub session tokens:**
 - No explicit revocation (stateless HMAC tokens)

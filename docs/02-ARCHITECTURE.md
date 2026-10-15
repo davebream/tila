@@ -774,10 +774,11 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
 | GET | `/journal` | query: `after_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `event_name`, `correlation_id`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — without `after_seq` the newest `limit` events, newest first; with `after_seq` the next `limit` events after it, oldest first, so a client pages forward by passing the last `seq` as `after_seq` until a page is shorter than `limit`. `archived: true` (cursor below `lastArchivedSeq`) returns no events: read archived history with `/journal/replay` |
-| GET | `/journal/stream` | query: `since_seq` | Historical SSE proposal; not implemented in v0.10.0. Use journal reads and durable cursors; no scheduled SSE milestone. |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
 | GET | `/` (and static paths) | — | UI HTML/JS bundle |
+
+There is no `/journal/stream` route, and the Worker serves no server-sent-event stream. Follow new events by paging `GET /journal` forward with `after_seq`, and read archived history with `GET /journal/replay`.
 
 ### 3a.3 Idempotency keys
 
