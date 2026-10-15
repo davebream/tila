@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Task `data` is now limited to 256 KiB, measured as the UTF-8 byte length of its JSON (`MAX_TASK_DATA_BYTES`, 262,144 bytes). Creating a task, or updating one so that its merged data exceeds the limit, answers `413 payload-too-large` with `retryable: false`; data exactly at the limit is accepted. Clients that stored larger task data must trim it: a task already over the limit can only be updated to something strictly smaller. Records keep their 64 KiB bound. There are no migrations (#519).
 - `tila task close` now requires the applied schema to declare a lifecycle for the task's type that maps the outcome to a terminal state. Projects created before this release have no lifecycle (or one that maps only `success` and `cancelled`) and are not migrated: add `[work_units.<type>.lifecycle]` and `[work_units.<type>.lifecycle.outcomes]` (see `tila.schema.toml`), include the mapped states in the lifecycle field's values, and run `tila schema apply`. Until then `close` stops with an error before writing. Tasks closed by earlier versions keep their stored data (#522).
 
+### Changed
+
+- The dashboard serves its logo and heading font, Space Grotesk 500 and 700 (Latin and Latin Extended subsets, SIL Open Font License 1.1), from its own origin instead of Google Fonts. The browser no longer contacts `fonts.googleapis.com` or `fonts.gstatic.com`; the four font files add about 55 KB to the UI assets and the license text ships at `/fonts/space-grotesk/OFL.txt`. Redeploy the Worker with the bundled UI to pick this up (#525).
+
 ### Fixed
 
 - Creating a relationship to a task that does not exist, for any relationship type, answers `404 not-found` naming the missing id with `retryable: false`, instead of a retryable `500 internal` from the foreign key. `from_id` is checked first. Valid requests, duplicates and the `parent-child` leaf rejection are unchanged (#519).
