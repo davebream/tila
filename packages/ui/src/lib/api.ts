@@ -75,8 +75,8 @@ import type {
   InstantiateTemplateRequest,
   InstantiateTemplateResponse,
   RecordCreateRequest,
-  RecordMutateResponse,
   RecordSetRequest,
+  RecordWriteResponse,
   TemplateListResponse,
   UpdateEntityRequest,
 } from "@tila/schemas";
@@ -1300,14 +1300,18 @@ export async function instantiateTemplate(
   );
 }
 
-/** First write of `key`; 409 when it already exists. */
+/**
+ * First write of `key`; 409 when it already exists. A credential that may
+ * write the key but not read it gets a receipt (`isRecordWriteReceipt`), not
+ * the record.
+ */
 export async function createRecord(
   projectId: string,
   type: string,
   body: RecordCreateRequest,
   idempotencyKey?: string,
-): Promise<RecordMutateResponse> {
-  return mutate<RecordMutateResponse>(
+): Promise<RecordWriteResponse> {
+  return mutate<RecordWriteResponse>(
     "POST",
     projectPath(projectId, `/records/${encodeURIComponent(type)}`),
     body,
@@ -1315,15 +1319,18 @@ export async function createRecord(
   );
 }
 
-/** Full replace at the record's current fence (its write counter). */
+/**
+ * Full replace at the record's current fence (its write counter). The
+ * response is a receipt under the rule of {@link createRecord}.
+ */
 export async function putRecord(
   projectId: string,
   type: string,
   key: string,
   body: RecordSetRequest,
   idempotencyKey?: string,
-): Promise<RecordMutateResponse> {
-  return mutate<RecordMutateResponse>(
+): Promise<RecordWriteResponse> {
+  return mutate<RecordWriteResponse>(
     "PUT",
     projectPath(
       projectId,
