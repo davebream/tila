@@ -414,19 +414,21 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
       );
     }
 
+    // Both endpoints must exist for every type, checked in the order the
+    // request names them so the first missing id is the one reported. Left to
+    // the foreign keys this would surface as a retryable 500.
+    const fromEntity = entityOps.get(db, body.from_id);
+    if (!fromEntity) {
+      return jsonError(c, 404, "not-found", `Entity ${body.from_id} not found`);
+    }
+    if (!entityOps.get(db, body.to_id)) {
+      return jsonError(c, 404, "not-found", `Entity ${body.to_id} not found`);
+    }
+
     if (body.type === "parent-child") {
-      const parentEntity = entityOps.get(db, body.from_id);
-      if (!parentEntity) {
-        return jsonError(
-          c,
-          404,
-          "not-found",
-          `Entity ${body.from_id} not found`,
-        );
-      }
       const parsedSchema = resolveCurrentSchema(db);
       if (parsedSchema) {
-        const leafCheck = checkLeafRejection(parsedSchema, parentEntity.type);
+        const leafCheck = checkLeafRejection(parsedSchema, fromEntity.type);
         if (!leafCheck.ok) {
           return jsonError(c, 422, leafCheck.code, leafCheck.message);
         }

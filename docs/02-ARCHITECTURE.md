@@ -752,11 +752,11 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
 | GET | `/search` | query: `q`, `kind`, `type`, `syntax`, `limit`, `cursor`, `tag_filter` | `{ results: [], total, next_cursor, scope }` — `total` counts this page (§14.8) |
 | GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
-| POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` |
+| POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` — `data` is limited to 256 KiB (§14.10) |
 | GET | `/entities/:id` | — | `{ entity, claim?, recent_journal }` |
-| PATCH | `/entities/:id` | `{ patch, idempotency_key }` | `{ entity }` |
+| PATCH | `/entities/:id` | `{ patch, idempotency_key }` | `{ entity }` — the merged `data` is limited to 256 KiB (§14.10) |
 | POST | `/entities/:id/archive` | `{ idempotency_key }` | `{ ok }` |
-| POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` |
+| POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` — both tasks must exist, else 404 `not-found` (§14.10) |
 | DELETE | `/entities/:id/relationships/:to/:type` | — | `{ ok }` |
 | POST | `/acquire` | `{ resource, mode, ttl_ms, metadata? }` + participant/environment headers | `{ ok: true, fence, expires_at, participant_id }` or 409 |
 | POST | `/renew` | `{ resource, fence, ttl_ms }` + participant/environment headers | `{ ok: true, expires_at }` or 409 |
@@ -3387,6 +3387,48 @@ The page states are derived in order:
 7. **Idle:** every check completed and found nothing.
 
 A forbidden check is listed as "not checked with your access", never as zero.
+
+### 14.10 Task write bounds (#519)
+
+Two task writes that used to reach SQLite and answer a retryable 500 are
+refused before the write, with a non-retryable error.
+
+**Task data is limited to 256 KiB.** The limit is `MAX_TASK_DATA_BYTES`
+(262,144) in `@tila/schemas`, measured as the UTF-8 byte length of the JSON the
+task's `data` is stored as, so key order does not change it and multibyte
+characters count by bytes. `data` exactly at the limit is accepted; one byte more
+is refused with `413 payload-too-large` and `retryable: false`, and nothing is
+written (no task, tags, search document or journal event).
+
+| Write | What is measured |
+|---|---|
+| Create (`POST /tasks`) | The `data` of the new task. The Worker refuses it before the Durable Object hop; the shared ops layer checks every create again, including each task a template creates. |
+| Update (`PATCH /tasks/:id`) | The merged `data` (stored data with the patch applied), not the patch. A patch under the limit can still be refused. |
+
+- **Oversized stored tasks can only shrink.** A task whose stored `data` is
+  already over the limit (written before the bound existed) may be updated only
+  when the result is strictly smaller than what is stored. That lets a client
+  trim it; an update that keeps the size or grows it, including a patch that
+  changes nothing, is refused with the same `413`. Once the task is within the
+  limit the ordinary rule applies.
+- **Attempts are not stranded.** An execution attempt's lifecycle transition
+  (the start state or an outcome state named by the definition) is not
+  refused for size, so work already in flight on such a task can still finish.
+  Only that one write is exempt; the same state set by a client update is not.
+- **Same rule everywhere.** The check lives in the shared ops layer, so
+  embedded and local backends refuse the same way. They raise
+  `TaskDataTooLargeError`, which maps to `payload-too-large`.
+- Records keep their own 64 KiB bound; task list behavior is unchanged.
+
+**A relationship needs two existing tasks.** `POST /tasks/relationships` checks
+`from_id`, then `to_id`, for every relationship type, and answers
+`404 not-found` naming the first missing id with `retryable: false`. Nothing is
+written. Valid requests (`201`, `created: true`) and duplicates (`200`,
+`created: false`) are unchanged, and a `parent-child` request is still refused
+with `422` when the parent's type is the hierarchy leaf (checked after both tasks
+are known to exist). Archived tasks remain valid endpoints. Embedded and local
+backends do not yet make this check; their callers see the database's foreign
+key error.
 
 ## Managed execution foundations
 
