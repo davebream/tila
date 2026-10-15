@@ -961,10 +961,17 @@ The tila CLI supports two authentication modes:
 
 Resolves a long-lived D1 API token from:
 
-1. `TILA_API_TOKEN` environment variable
-2. `.tila/.env` file (format: `TILA_API_TOKEN=tila_abc123...`)
+1. Explicit `--token`
+2. `TILA_TOKEN` environment variable
+3. `TILA_API_TOKEN` legacy environment alias
+4. `.tila/.env` file (format: `TILA_API_TOKEN=tila_abc123...`)
 
-Implementation: `packages/cli/src/auth.ts` lines 21-67, `resolveToken()`.
+Each environment value is trimmed independently; absent, empty and
+whitespace-only values fall through. The legacy file key and parser are retained.
+A nonempty credential rejected by the server does not fall back to another one.
+
+Implementation: `resolveToken()` in `packages/cli/src/auth.ts`. Async startup
+also supports an eligible human session before the file, as described below.
 
 ### Mode 2: github-repo
 
@@ -1029,14 +1036,26 @@ if (cached.expires_at - now < PROACTIVE_REFRESH_SECONDS) {
 
 ### requireTokenAsync()
 
-Async token resolution (supports both modes):
+Async project-token resolution in `packages/cli/src/auth.ts` supports both modes:
 
-- **tila-token mode:** Returns token synchronously from env/file
-- **github-repo mode:** Performs GitHub exchange (async network call)
+1. Deny operator credential fallback in managed runtimes.
+2. Return explicit `--token`, then the first nonempty trimmed `TILA_TOKEN` or
+   `TILA_API_TOKEN` environment value. These overrides bypass human-session
+   lookup and GitHub exchange in either mode.
+3. When `worker_url` is set, CI is unset and stdin is a TTY, try the existing
+   human-session store.
+4. In **tila-token mode**, fall back to the legacy `.tila/.env` token. In
+   **github-repo mode**, validate the GitHub configuration and resolve the
+   cached/exchanged GitHub session through `resolveGithubRepoToken()`.
 
-Implementation: `packages/cli/src/auth.ts` lines 132-175.
+The synchronous GitHub path remains separate: `resolveToken()` returns null
+without an explicit flag, and `requireToken()` uses a valid cached `.session` or
+directs callers to async resolution. Environment tokens and the legacy `.env`
+file do not override that synchronous GitHub path.
 
-**Used by:** All CLI commands that need API access (claim, entity operations, etc.).
+**Used by:** Ordinary remote project startup and project API commands (claim,
+entity operations, etc.). Local backend startup bypasses project-token auth;
+multi-instance auth status uses its separate resolver.
 
 ## 10. Caching Architecture
 

@@ -953,8 +953,12 @@ Step 3 (if Cloudflare credentials needed):
     - If mismatch: error with both account IDs and suggest options (switch accounts, cancel, use a different project).
 
 Step 4 (if project API token needed):
-  - Read .tila/.env for TILA_API_TOKEN.
-    - If missing: error "no API token found; run `tila init` to join this project, or set TILA_API_TOKEN in your environment"
+  - Managed runtimes use their runtime broker; operator credential fallback is denied.
+  - Prefer explicit --token, then the first nonempty trimmed TILA_TOKEN or legacy TILA_API_TOKEN environment value.
+  - Async startup then tries a human session when worker_url is set, CI is unset and stdin is a TTY.
+  - In tila-token mode, fall back to .tila/.env using its existing TILA_API_TOKEN key.
+    - If missing: error "no API token found; run `tila init` to join this project, set TILA_TOKEN (legacy alias: TILA_API_TOKEN), or add TILA_API_TOKEN to .tila/.env"
+  - Async github-repo mode resolves a cached/exchanged GitHub session instead of the legacy file. The synchronous GitHub path only accepts --token or a valid cached .session; otherwise it requires async resolution.
   - Continue. Token is sent as Bearer header to the Worker. 401 from Worker is handled at the request site.
 
 Step 5: Execute the command.
