@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard serves its logo and heading font, Space Grotesk 500 and 700 (Latin and Latin Extended subsets, SIL Open Font License 1.1), from its own origin instead of Google Fonts. The browser no longer contacts `fonts.googleapis.com` or `fonts.gstatic.com`; the four font files add about 55 KB to the UI assets and the license text ships at `/fonts/space-grotesk/OFL.txt`. Redeploy the Worker with the bundled UI to pick this up (#525).
+
 ### Fixed
 
 - Data commands (`task`, `record`, `artifact` and the others that act on the project in the current directory) no longer ignore an explicit `--instance`. They run only when that instance is registered, trusted and is the Worker of the current directory's project (and `--project`, when given, names that project); otherwise they stop with `invalid-argument` before any credential is read or request is sent. Without `--instance` nothing changes. `tila project destroy` and `tila disconnect` apply the same check before reading credentials or deleting anything; `tila project destroy <slug>` accepts `--instance` only when it is the Worker saved in `~/.tila/infra.toml`. To act on another instance's project, run from that project's directory (#522).
