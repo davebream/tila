@@ -37,6 +37,7 @@ export function createCustomJournalRoutes(deps: RouterDeps) {
         origin: originFromBody(envelope),
         input: envelope.input,
         idempotencyKey: envelope.idempotency_key,
+        authorizedRole: envelope.authorized_role,
         policy: readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
         archives: deps.artifacts
           ? createR2JournalArchiveReader(deps.artifacts, envelope.project_id)
