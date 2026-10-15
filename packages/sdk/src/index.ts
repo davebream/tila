@@ -152,6 +152,7 @@ export type {
   RecordGetResponse,
   RecordMutateResponse,
   RecordWriteResponse,
+  RecordWriteResult,
   RecordWriteReceiptResponse,
   RecordListResponse,
   RecordListItem,

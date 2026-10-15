@@ -2974,7 +2974,11 @@ admits the key; otherwise it is the receipt `{ ok, receipt: true, type, key,
 fence }`. The receipt is explicit in the API schema (`RecordWriteResponse`), the
 SDK (`isRecordWriteReceipt`) and the MCP result schemas, so clients narrow on it
 rather than finding fields missing. The stale-fence message and the
-undeclared-type message are likewise limited for such a caller.
+undeclared-type message are likewise limited for such a caller. The remote
+`RecordBackend` resolves `createRecord`, `setRecord` and `putRecord` to
+`RecordWriteResult` (the flat row or the receipt) without reading the record
+back, and `tila record set` reports a receipt as a success with its fence and no
+revision.
 
 #### Scoped journal reads (#518)
 
