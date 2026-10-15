@@ -133,6 +133,9 @@ export const TILA_ERRORS = {
   ARTIFACT_GET_LATEST_FAILED: "artifact-get-latest-failed",
   JOURNAL_HISTORY_UNAVAILABLE: "journal-history-unavailable",
   JOURNAL_HISTORY_CONFLICT: "journal-history-conflict",
+  // 403 on a report whose `corrects_seq` the caller may not correct: only the
+  // original reporter or a project maintainer/owner can. Not retryable.
+  REPORT_CORRECTION_DENIED: "report-correction-denied",
   HANDOFF_NOT_FOUND: "handoff-not-found",
   HANDOFF_CONFLICT: "handoff-conflict",
   // Fallback (SDK-generated when response is unparseable)
