@@ -660,3 +660,138 @@ it("the lapsed-lease filter reaches the server and can be cleared", async () => 
   await user.click(screen.getByRole("button", { name: "Show all work" }));
   await waitFor(() => expect(requests.at(-1)?.get("lease")).toBeNull());
 });
+
+describe("blockers", () => {
+  const blockerList = () =>
+    screen.findByRole("list", { name: "Blockers for task-0" });
+
+  it("names each visible blocker with its state and a link to its task", async () => {
+    data.entries = entries(1);
+    data.entries[0].block_reasons = [
+      {
+        code: "dependency-unsatisfied",
+        resource: "task-b",
+        state: "in_review",
+      },
+      {
+        code: "dependency-unsatisfied",
+        resource: "task c/2",
+        state: "draft",
+      },
+      {
+        code: "dependency-cycle",
+        resource: "task-0",
+        path: ["task-0", "task-b", "task-0"],
+      },
+    ];
+    renderQueue();
+    const list = await blockerList();
+    const links = within(list).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "task-b",
+      "task c/2",
+      "task-0",
+    ]);
+    // The visible ID is URL-encoded into the task page path.
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/p/test-project/tasks/task-b",
+      "/p/test-project/tasks/task%20c%2F2",
+      "/p/test-project/tasks/task-0",
+    ]);
+    const [review, draft, cycle] = within(list).getAllByRole("listitem");
+    expect(review).toHaveTextContent(
+      "dependency-unsatisfied task-b · in_review",
+    );
+    expect(draft).toHaveTextContent("dependency-unsatisfied task c/2 · draft");
+    expect(cycle).toHaveTextContent(
+      "dependency-cycle task-0 · task-0 → task-b → task-0",
+    );
+  });
+
+  it("shows a withheld predecessor generically, with no self-blocker and no extra fetch", async () => {
+    data.entries = entries(1);
+    // What the server sends in place of a predecessor the caller may not read.
+    data.entries[0].block_reasons = [
+      { code: "dependency-unsatisfied", resource: "task-0" },
+      { code: "dependency-unsatisfied", resource: "task-b", state: "draft" },
+    ];
+    const requested: string[] = [];
+    const record = ({ request }: { request: Request }) => {
+      requested.push(new URL(request.url).pathname);
+    };
+    server.events.on("request:start", record);
+    try {
+      renderQueue();
+      const list = await blockerList();
+      const [restricted, visible] = within(list).getAllByRole("listitem");
+      expect(restricted).toHaveTextContent(
+        /^Waiting on a restricted predecessor$/,
+      );
+      expect(within(restricted).queryByRole("link")).toBeNull();
+      expect(within(list).queryByText("task-0")).toBeNull();
+      expect(
+        within(visible).getByRole("link", { name: "task-b" }),
+      ).toBeInTheDocument();
+      await screen.findByText("Work 0");
+      // The queue and identity reads only: no task or relationship lookups.
+      expect(
+        requested.filter((path) => /\/tasks|\/relationships/.test(path)),
+      ).toEqual([]);
+    } finally {
+      server.events.removeListener("request:start", record);
+    }
+  });
+
+  it("keeps the entry's own conditions, gates and missing predecessors readable without false links", async () => {
+    data.entries = entries(1);
+    data.entries[0].block_reasons = [
+      { code: "not-dispatchable", resource: "task-0", state: "draft" },
+      { code: "retry-backoff", resource: "task-0" },
+      { code: "gate-pending", resource: "gate-77" },
+      { code: "dependency-missing", resource: "task-gone" },
+    ];
+    renderQueue();
+    const list = await blockerList();
+    const [dispatch, backoff, gate, missing] =
+      within(list).getAllByRole("listitem");
+    expect(dispatch).toHaveTextContent(/^not-dispatchable · draft$/);
+    expect(backoff).toHaveTextContent(/^retry-backoff$/);
+    expect(gate).toHaveTextContent(/^gate-pending gate-77$/);
+    expect(missing).toHaveTextContent(/^dependency-missing task-gone$/);
+    expect(within(list).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("renders no blocker list for work that nothing blocks", async () => {
+    renderQueue();
+    expect(await screen.findByText("Work 0")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /Blockers for/ })).toBeNull();
+  });
+
+  it("shows a blocker's new state when the queue refetches", async () => {
+    data.entries = entries(1);
+    data.entries[0].block_reasons = [
+      {
+        code: "dependency-unsatisfied",
+        resource: "task-b",
+        state: "in_review",
+      },
+    ];
+    const { queryClient } = renderQueue();
+    const list = await blockerList();
+    expect(within(list).getByText("in_review")).toBeInTheDocument();
+    data.entries[0].block_reasons = [
+      {
+        code: "dependency-unsatisfied",
+        resource: "task-b",
+        state: "in_progress",
+      },
+    ];
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["queue", "test-project"],
+      });
+    });
+    expect(await screen.findByText("in_progress")).toBeInTheDocument();
+    expect(screen.queryByText("in_review")).toBeNull();
+  });
+});

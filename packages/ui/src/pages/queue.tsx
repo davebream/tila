@@ -1,4 +1,5 @@
 import { AttemptDetail } from "@/components/queue/attempt-detail";
+import { BlockReasons } from "@/components/queue/block-reasons";
 import {
   EnrollmentForm,
   EntryEditor,
@@ -154,14 +155,11 @@ export function QueuePage() {
                         Authority expired — reconciliation required
                       </p>
                     )}
-                  {block_reasons.map((reason, index) => (
-                    <p
-                      key={`${reason.code}:${index}`}
-                      className="text-xs text-status-amber"
-                    >
-                      {reason.code} {reason.path?.join(" → ")}
-                    </p>
-                  ))}
+                  <BlockReasons
+                    project={project}
+                    taskId={entry.task_id}
+                    reasons={block_reasons}
+                  />
                 </td>
                 <td className="p-3 font-mono">{entry.priority}</td>
                 <td className="p-3 text-xs">
