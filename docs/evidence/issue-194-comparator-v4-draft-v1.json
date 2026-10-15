@@ -1,0 +1,52 @@
+{
+  "schema": "tila.dogfood.comparator-contract/4-draft-1",
+  "issue": 194,
+  "status": "prospective contract only; no new runner or passing equivalence receipt",
+  "authority": "E holds expectations and compares; isolated U runs all submitted functions/tests/config/hooks. U has no expectations, E/C/N state, service, credentials or network; sealed submission read-only, ephemeral scratch.",
+  "order": "Original scenario.cases array order; unchanged name/tags/count; send one current case input only after previous result. Do not send expected values or all cases.",
+  "module_lifetime": "One fresh isolated Node process per scenario/submission; cache ES modules across its ordered cases as original import URLs do. No restart per call; crash/timeout ends that process and remaining cases fail, with explicit reasons.",
+  "input": "file/export plus args, or command argv and records, per frozen case; no expected/throws/tag/pass fields to U",
+  "return": "one length-framed JSON value or {throw:{name,message}} on private result channel; stdout/stderr separate untrusted captures; no pass boolean accepted",
+  "equality": "E applies isDeepStrictEqual to JSON-normalized return (JSON.parse(JSON.stringify(value))) and frozen equals. Serialization exception/undefined/cycle/BigInt is a failed case. No coercion, sorting, numeric tolerance or trimming.",
+  "throws": "For expects.throws compare exact name AND message. Did-not-throw fails; unexpected throw fails. Hostile exception access/serialization failure is failure, never comparator authority.",
+  "commands": "Capture ordered out/err callback arguments and return code; compare {code,out,err} exactly against frozen expect with isDeepStrictEqual in E. Require JSON-compatible values; non-JSON loses transport fidelity and explicitly fails (prospective amendment). Process stdout is not callback output.",
+  "resource_bounds": {
+    "per_case_wall_ms": 10000,
+    "per_submission_wall_ms": 120000,
+    "cpu_cores": 1,
+    "memory_bytes": 536870912,
+    "pids": 64,
+    "scratch_bytes": 67108864,
+    "result_bytes_per_case": 1048576,
+    "stdout_bytes_per_submission": 1048576,
+    "stderr_bytes_per_submission": 1048576,
+    "visible_test_wall_ms": 30000
+  },
+  "failure": "Timeout/crash/limit breach/oversize/malformed/duplicate/unframed output is a failed case; crash/timeout/limit breach terminates U and all remaining cases fail with reason. E failure or unproven isolation is V4-instrument, not a product failure. Missing export fails. No silent retries/restarts.",
+  "visible_tests": "Worker-authored test/config/hook code during integration and verification uses U identity/profile too; retain separate terminal/capture. Visible test status is not hidden acceptance. Integration git hooks disabled; never execute worker config under E/C/N.",
+  "equivalence_matrix": {
+    "scenarios": ["p1-x", "p1-y", "p2-x", "p2-y"],
+    "fixtures": [
+      "reference.amended",
+      "reference.original",
+      "repoFiles",
+      "mutant.item1",
+      "mutant.item2"
+    ],
+    "required": "Compare each named case/tag with original runner on trusted fixtures only: amended all pass; original D0 fails D1 subset; baseline and each constant mutant fail as before. Retain old runner hash separately."
+  },
+  "negative_controls": [
+    "malicious import reads expectations",
+    "submitted test reads E/C/N state",
+    "forged passing JSON/stdout",
+    "overwrite authoritative evidence",
+    "worker-service access",
+    "infinite loop",
+    "crash",
+    "malformed/oversize result",
+    "exception metadata attack",
+    "module state/order regression"
+  ],
+  "runner_source_sha256": null,
+  "runner_source_unavailable_reason": "No v4 runner authored in method draft. D3 must bind separately reviewed actual runner/decoder bytes; D2/D5 require equivalence and hostile-code controls. This draft is not execution-ready."
+}
