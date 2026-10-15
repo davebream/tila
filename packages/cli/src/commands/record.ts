@@ -6,6 +6,7 @@ import {
   type RecordListItem,
   type TilaSchemaToml,
   TilaSchemaTomlSchema,
+  isRecordWriteReceipt,
 } from "@tila/schemas";
 import { defineCommand } from "citty";
 import { parse as parseTOML } from "smol-toml";
@@ -179,42 +180,39 @@ export default defineCommand({
 
         const fence = args.fence ? Number(args.fence) : undefined;
 
-        if (fence !== undefined) {
-          // Update existing record (set with fence)
-          const result = await withSpinner("Setting record...", () =>
-            ctx.record.setRecord({
-              type: recordType,
-              key,
-              value,
-              fence,
-              sourceArtifactKey,
-            }),
-          );
-          if (args.json) {
-            printJson(result);
-            return;
-          }
-          outputText(
-            `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
-          );
-        } else {
-          // Create new record (no fence)
-          const result = await withSpinner("Creating record...", () =>
-            ctx.record.createRecord({
-              type: recordType,
-              key,
-              value,
-              sourceArtifactKey,
-            }),
-          );
-          if (args.json) {
-            printJson(result);
-            return;
-          }
-          outputText(
-            `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
-          );
+        // A write-only credential gets a receipt (type, key, fence) instead of
+        // the stored row, and the record is deliberately not read back: no
+        // revision exists to print and none is invented.
+        const result =
+          fence !== undefined
+            ? // Update existing record (set with fence)
+              await withSpinner("Setting record...", () =>
+                ctx.record.setRecord({
+                  type: recordType,
+                  key,
+                  value,
+                  fence,
+                  sourceArtifactKey,
+                }),
+              )
+            : // Create new record (no fence)
+              await withSpinner("Creating record...", () =>
+                ctx.record.createRecord({
+                  type: recordType,
+                  key,
+                  value,
+                  sourceArtifactKey,
+                }),
+              );
+        if (args.json) {
+          printJson(result);
+          return;
         }
+        outputText(
+          isRecordWriteReceipt(result)
+            ? `Set record ${recordType}/${key} (fence ${result.fence}; write receipt, revision not returned)`
+            : `Set record ${recordType}/${key} (rev ${result.revision}, fence ${result.fence})`,
+        );
       },
     }),
 

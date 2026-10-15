@@ -356,6 +356,7 @@ export {
   type RecordWriteReceiptResponse,
   RecordWriteResponseSchema,
   type RecordWriteResponse,
+  type RecordWriteResult,
   isRecordWriteReceipt,
   RecordListItemSchema,
   type RecordListItem,

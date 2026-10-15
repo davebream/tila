@@ -1819,16 +1819,30 @@ export type RecordWriteReceiptResponse = z.infer<
  * `create` / `set` / `put` response: the full record for a caller that may
  * read it (unchanged for every legacy policy), or a receipt for one that may
  * only write it. Discriminate with {@link isRecordWriteReceipt}.
+ *
+ * The receipt is tried first. `receipt: true` is the server saying this caller
+ * may not read the record, so it decides the shape even if stored fields ride
+ * along: they are stripped, never surfaced as a full record.
  */
 export const RecordWriteResponseSchema = z.union([
-  RecordMutateResponseSchema,
   RecordWriteReceiptResponseSchema,
+  RecordMutateResponseSchema,
 ]);
 
 export type RecordWriteResponse = z.infer<typeof RecordWriteResponseSchema>;
 
+/**
+ * What a `RecordBackend` write (`createRecord`, `setRecord`, `putRecord`)
+ * resolves to: the flat {@link RecordRow} for every local write and for a
+ * remote caller that may read the record, or the receipt for a remote caller
+ * that may only write it. A receipt has no revision, value or timestamps, and
+ * none is reconstructed from the caller's input or by reading the record back.
+ * Discriminate with {@link isRecordWriteReceipt}.
+ */
+export type RecordWriteResult = RecordRow | RecordWriteReceiptResponse;
+
 export function isRecordWriteReceipt(
-  response: RecordWriteResponse,
+  response: RecordWriteResponse | RecordWriteResult,
 ): response is RecordWriteReceiptResponse {
   return "receipt" in response && response.receipt === true;
 }

@@ -78,6 +78,8 @@ import type {
   RecordHistoryItem,
   RecordListItem,
   RecordRow,
+  RecordWriteResponse,
+  RecordWriteResult,
 } from "@tila/schemas";
 import {
   AckSignalResponseSchema,
@@ -105,6 +107,7 @@ import {
   RecordHistoryResponseSchema,
   RecordListResponseSchema,
   RecordMutateResponseSchema,
+  RecordWriteResponseSchema,
   ReleaseSuccessResponseSchema,
   RenewSuccessResponseSchema,
   SendSignalResponseSchema,
@@ -113,6 +116,7 @@ import {
   SignalHistoryResponseSchema,
   StateResponseSchema,
   SummaryResponseSchema,
+  isRecordWriteReceipt,
 } from "@tila/schemas";
 import { z } from "zod";
 import { createArtifactMethods } from "../artifacts";
@@ -1346,6 +1350,11 @@ export class RemoteArtifactBackend implements ArtifactBackend {
  * `RecordRow`, which is `RecordItem` extended with `fence`, so each method
  * merges the two: `{ ...result.record, fence: result.fence }`.
  *
+ * `createRecord`, `setRecord` and `putRecord` may instead resolve to the write
+ * receipt of a credential that can write but not read the key (see
+ * `RecordWriteResult`). The receipt is returned as sent: nothing is read back
+ * and no row, revision or timestamp is reconstructed from the input.
+ *
  * Like the SDK, multi-segment keys are encoded segment-by-segment so embedded
  * slashes survive routing (the Worker matches `:key{.+}`).
  */
@@ -1364,7 +1373,17 @@ export class RemoteRecordBackend implements RecordBackend {
     return key.split("/").map(encodeURIComponent).join("/");
   }
 
-  async createRecord(input: CreateRecordInput): Promise<RecordRow> {
+  /**
+   * A create/set/put response is the full record or, for a credential that may
+   * write but not read the key, a receipt. The mutation is already committed
+   * when this runs, so a receipt must never be rejected as an unexpected shape.
+   */
+  private toWriteResult(result: RecordWriteResponse): RecordWriteResult {
+    if (isRecordWriteReceipt(result)) return result;
+    return { ...result.record, fence: result.fence };
+  }
+
+  async createRecord(input: CreateRecordInput): Promise<RecordWriteResult> {
     const body: Record<string, unknown> = {
       key: input.key,
       value: input.value,
@@ -1376,12 +1395,12 @@ export class RemoteRecordBackend implements RecordBackend {
     const result = await this.client.post(
       `${this.base()}/${input.type}`,
       body,
-      { schema: RecordMutateResponseSchema, validate: true },
+      { schema: RecordWriteResponseSchema, validate: true },
     );
-    return { ...result.record, fence: result.fence };
+    return this.toWriteResult(result);
   }
 
-  async setRecord(input: SetRecordInput): Promise<RecordRow> {
+  async setRecord(input: SetRecordInput): Promise<RecordWriteResult> {
     const body: Record<string, unknown> = {
       value: input.value,
       fence: input.fence,
@@ -1393,12 +1412,12 @@ export class RemoteRecordBackend implements RecordBackend {
     const result = await this.client.put(
       `${this.base()}/${input.type}/${this.encodeKey(input.key)}`,
       body,
-      { schema: RecordMutateResponseSchema, validate: true },
+      { schema: RecordWriteResponseSchema, validate: true },
     );
-    return { ...result.record, fence: result.fence };
+    return this.toWriteResult(result);
   }
 
-  async putRecord(input: PutRecordInput): Promise<RecordRow> {
+  async putRecord(input: PutRecordInput): Promise<RecordWriteResult> {
     const body: Record<string, unknown> = {
       value: input.value,
     };
@@ -1409,9 +1428,9 @@ export class RemoteRecordBackend implements RecordBackend {
     const result = await this.client.post(
       `${this.base()}/${input.type}/~/put/${this.encodeKey(input.key)}`,
       body,
-      { schema: RecordMutateResponseSchema, validate: true },
+      { schema: RecordWriteResponseSchema, validate: true },
     );
-    return { ...result.record, fence: result.fence };
+    return this.toWriteResult(result);
   }
 
   async getRecord(type: string, key: string): Promise<RecordRow | null> {

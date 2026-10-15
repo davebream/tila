@@ -1,3 +1,4 @@
+import { isRecordWriteReceipt } from "@tila/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TilaApiError, type TilaClient } from "../../client";
 
@@ -702,6 +703,7 @@ describe("RemoteRecordBackend", () => {
       expect.objectContaining({ key: "api", value: { host: "localhost" } }),
       expect.anything(),
     );
+    if (isRecordWriteReceipt(row)) throw new Error("expected a record");
     expect(row.fence).toBe(7);
     expect(row.value).toEqual({ host: "localhost" });
   });

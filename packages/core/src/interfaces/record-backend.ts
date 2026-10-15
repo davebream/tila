@@ -4,6 +4,7 @@ import type {
   RecordHistoryItem,
   RecordListItem,
   RecordRow,
+  RecordWriteResult,
 } from "@tila/schemas";
 
 export interface CreateRecordInput {
@@ -109,13 +110,27 @@ export interface RecordPage<T> {
  * `RecordHistoryItem` carries the read-only
  * `schema_version`/`actor`/`canonical_artifact_key` output fields.
  *
+ * ## Write results — row or receipt
+ *
+ * `createRecord`, `setRecord` and `putRecord` resolve to a `RecordWriteResult`:
+ * the full `RecordRow` or, from a remote credential that may write but not read
+ * the key, a write receipt (`receipt: true`, `type`, `key`, `fence`). A receipt
+ * carries no value, revision or timestamps and is never filled in from the
+ * caller's input or by reading the record back. Narrow with
+ * `isRecordWriteReceipt` from `@tila/schemas` before reading `revision` or
+ * `value`. The local backend (`EmbeddedProject`) and any remote credential that
+ * can read what it writes keep returning the full row, so those callers need no
+ * change; code typed against `RecordBackend` must handle the receipt branch.
+ * `patchRecord`, `archiveRecord` and `unarchiveRecord` need read access to the
+ * same key, never return a receipt, and stay `RecordRow`.
+ *
  * The record types are the canonical schema types from `@tila/schemas`; never
  * import them from `@tila/ops-sqlite` (that would invert the dependency flow).
  */
 export interface RecordBackend {
-  createRecord(input: CreateRecordInput): Promise<RecordRow>;
-  setRecord(input: SetRecordInput): Promise<RecordRow>;
-  putRecord(input: PutRecordInput): Promise<RecordRow>;
+  createRecord(input: CreateRecordInput): Promise<RecordWriteResult>;
+  setRecord(input: SetRecordInput): Promise<RecordWriteResult>;
+  putRecord(input: PutRecordInput): Promise<RecordWriteResult>;
   getRecord(type: string, key: string): Promise<RecordRow | null>;
   patchRecord(input: PatchRecordInput): Promise<RecordRow>;
   archiveRecord(input: ArchiveRecordInput): Promise<RecordRow>;
