@@ -122,6 +122,75 @@ describe("RecordDetailPage revision history", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("shows each revision's principal and token beside the actor", async () => {
+    server.use(
+      historyOk([
+        {
+          ...historyItem,
+          revision: 3,
+          actor: "deploy-bot",
+          principal_id: "service:deploy",
+          token_id: "token-b",
+        },
+        {
+          ...historyItem,
+          revision: 2,
+          actor: "deploy-bot",
+          principal_id: "service:deploy",
+          token_id: "token-a",
+        },
+        // A browser session: a principal but no credential.
+        {
+          ...historyItem,
+          revision: 1,
+          actor: "alice",
+          principal_id: "user:alice",
+          token_id: null,
+        },
+      ]),
+      recordOk(),
+      listOk,
+    );
+    renderRecord();
+
+    const history = await screen.findByRole("table", {
+      name: "Revision history",
+    });
+    const rows = within(history).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(3);
+    // Two tokens under one display name stay distinguishable.
+    expect(rows[0]).toHaveTextContent("service:deploy");
+    expect(rows[0]).toHaveTextContent("token token-b");
+    expect(rows[1]).toHaveTextContent("service:deploy");
+    expect(rows[1]).toHaveTextContent("token token-a");
+    expect(rows[2]).toHaveTextContent("user:alice");
+    expect(rows[2]).not.toHaveTextContent("token");
+  });
+
+  test("shows an unrecorded author as such, not as a guess", async () => {
+    server.use(
+      historyOk([
+        { ...historyItem, principal_id: null, token_id: null },
+        // Older Worker: the fields are absent altogether.
+        { ...historyItem, revision: 2 },
+        // Written before principals were tracked, with a stored credential.
+        { ...historyItem, revision: 1, principal_id: null, token_id: "tok-9" },
+      ]),
+      recordOk(),
+      listOk,
+    );
+    renderRecord();
+
+    const history = await screen.findByRole("table", {
+      name: "Revision history",
+    });
+    const rows = within(history).getAllByRole("row").slice(1);
+    expect(within(rows[0]).getByTitle("Not recorded")).toHaveTextContent("—");
+    expect(within(rows[1]).getByTitle("Not recorded")).toHaveTextContent("—");
+    expect(rows[2]).toHaveTextContent("token tok-9");
+    expect(within(rows[2]).queryByTitle("Not recorded")).toBeNull();
+  });
+
   test("a pending history request shows loading text", async () => {
     server.use(
       http.get("*/projects/*/records/:type/~/history/*", async () => {

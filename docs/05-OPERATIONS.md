@@ -3336,6 +3336,13 @@ can record verified observations, rebind the same recorded execution, or force
 recovery with a reason. Force recovery records unresolved external execution;
 it does not kill a process.
 
+The page and the Overview's queue counts request the compact listing
+(`compact=true`), so rows carry each task's title/name and lifecycle state rather
+than its full data, and opening a row loads the whole task. Compact lowers the
+bytes sent, not the Durable Object's work: it still reads the full readiness
+snapshot for every request. Use `tila queue inspect --data '{"compact":true}'
+--json` for the same view from scripts; omit `compact` for the full task data.
+
 Actions follow current role and credential capabilities. When permission queries
 are unavailable, the queue remains visible but actions are disabled. Failed
 refreshes show the last known state with a stale notice. Revision conflicts retain
