@@ -51,3 +51,50 @@ test("the embedded facade enforces global limits, replay and ordinary managed co
     harness.close();
   }
 });
+
+test("the embedded facade lists a compact queue that narrows only task data", async () => {
+  const harness = makeHarness();
+  try {
+    schemaOps.applySchema(harness.db, lifecycleDefinition, "fixture");
+    const { queue } = harness.project;
+    await queue.configure({
+      idempotency_key: "enable",
+      expected_revision: 0,
+      enabled: true,
+      paused: false,
+      execution_limit: 1,
+    });
+    entityOps.create(
+      harness.db,
+      {
+        id: "task",
+        type: "issue",
+        data: {
+          phase: "todo",
+          title: "A title",
+          notes: "A long note. ".repeat(50),
+        },
+        created_by: "fixture",
+      },
+      1,
+      attemptOrigin,
+    );
+    await queue.enroll({ task_id: "task", idempotency_key: "enroll" });
+    const full = await queue.inspect();
+    expect(await queue.inspect({ compact: false })).toMatchObject({
+      total: 1,
+      entries: [{ task: { data: { notes: expect.any(String) } } }],
+    });
+    const compact = await queue.inspect({ compact: true });
+    expect(full.entries[0].task?.data.notes).toEqual(expect.any(String));
+    expect(compact.entries[0].task).toEqual({
+      id: "task",
+      type: "issue",
+      data: { phase: "todo", title: "A title" },
+    });
+    expect(compact.entries[0].entry).toEqual(full.entries[0].entry);
+    expect(compact.total).toBe(full.total);
+  } finally {
+    harness.close();
+  }
+});

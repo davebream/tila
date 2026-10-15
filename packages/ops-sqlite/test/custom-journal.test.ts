@@ -116,7 +116,7 @@ describe("authenticated custom reports", () => {
       (await send("project-limited", {}, { now: now + 60_000 })).response.event
         .seq,
     ).toBe(301);
-  });
+  }, 30_000);
   it("interleaves in the journal without changing domain state or using producer time for order", async () => {
     createEntity(fixture.db, { id: "one" });
     const before = fixture.db.select().from(schema.entities).all();

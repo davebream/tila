@@ -3813,6 +3813,32 @@ Scheduling capabilities are declared compatibility metadata, not authorization.
 A valid denial (`no_grant`: disabled, paused, empty, blocked or capacity exhausted)
 is distinct from transport failure and conflict errors.
 
+**Compact inspection.** `compact` is an additive boolean on queue inspection
+(`GET /queue?compact=true`, `tila queue inspect --data '{"compact":true}'`,
+`tila_queue` `inspect` with `query.compact`, and `queue.inspect({ compact: true })`
+in the SDK, local and remote). Absent or `false`, the response is the full one,
+byte for byte as before; HTTP accepts only the literals `true` and `false` and
+answers `400 validation-error` for anything else (`compact=1`, `compact=`).
+With `true`, only `task` changes: it is `{ id, type, data }` without the
+task's stored metadata (timestamps, creator, archive flag), and `data` holds
+just `title`, `name` and the type's declared lifecycle state field, each only
+if present and with its stored value.
+Entries, attempts, block reasons, counts, policy, diagnostics, ordering,
+paging and resource restrictions are those of the full listing, so a
+restricted credential never receives more than it does without `compact`.
+The Queue page and the Overview's queue counts request it; opening a row loads
+the full task, and other readers (the task page, SDK consumers that read
+`task.data`) keep requesting the full shape.
+
+Compact reduces response bytes, not server work: the Durable Object still
+reads the full readiness snapshot to evaluate every entry. The saving depends
+on how much a task carries beyond its title, because the entry, attempt and
+block reasons are not narrowed (about 0.65 KB per entry). On a 100-task
+fixture, uncompressed: with about 5 KB of task content each, which matches the
+roughly 575 KB response observed in issue #525, the listing falls from about
+583 KB to 67 KB (8.7x); with 2 KB of content, from 283 KB to 67 KB (4.2x),
+under 5x; with 1 KB, 2.7x.
+
 The CLI accepts operation JSON through `--data` or `--file`, including stable
 idempotency keys. For example:
 

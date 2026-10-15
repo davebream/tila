@@ -437,6 +437,7 @@ describe("runMigrationsWithPitrRollback", () => {
                   "actor",
                   "created_at",
                   "message",
+                  "principal_id",
                 ],
                 record_tags: ["type", "key", "tag"],
                 records: [

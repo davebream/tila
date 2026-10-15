@@ -219,6 +219,14 @@ export const QueueListQuerySchema = z.object({
   /** `expired`: the latest attempt is starting or running past its lease. */
   lease: z.literal("expired").optional(),
   capabilities: CapabilitiesSchema.optional(),
+  /**
+   * `true` narrows each entry's `task` to `{ id, type, data }` where `data`
+   * holds only `title`, `name` and the type's declared lifecycle field. The
+   * entries, counts, policy and block reasons are unchanged, as is visibility.
+   * Absent or `false` returns the full task. A boolean, not a coerced string:
+   * the HTTP boundary accepts the literals `true` and `false` only.
+   */
+  compact: z.boolean().default(false),
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).default(0),
 });

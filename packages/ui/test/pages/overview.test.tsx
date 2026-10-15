@@ -260,6 +260,23 @@ describe("OverviewPage", () => {
     ]);
   });
 
+  test("the queue counts ask for the compact listing", async () => {
+    const seen = useScenario(scenario("S1 configured"), {
+      ...QUIET,
+      queue: { uncertain: 3 },
+    });
+    renderOverview();
+    await screen.findByRole("link", {
+      name: "View 3 executions with an uncertain outcome",
+    });
+    const queue = seen.filter(({ path }) => path.endsWith("/queue"));
+    expect(queue).toHaveLength(2);
+    for (const { params } of queue) {
+      expect(params.get("compact")).toBe("true");
+      expect(params.get("limit")).toBe("1");
+    }
+  });
+
   test("each count uses the same filters as the list it links to", async () => {
     const seen = useScenario(scenario("S1 configured"), {
       ...QUIET,

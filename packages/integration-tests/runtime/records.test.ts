@@ -1,5 +1,9 @@
 import { SELF, runInDurableObject } from "cloudflare:test";
-import { canonicalJson, canonicalJsonSha256 } from "@tila/schemas";
+import {
+  type CredentialPolicy,
+  canonicalJson,
+  canonicalJsonSha256,
+} from "@tila/schemas";
 import { expect, it } from "vitest";
 import { CredentialStore } from "../../worker/src/d1/credential-store";
 import { generateToken } from "../../worker/src/lib/hash";
@@ -452,6 +456,106 @@ it("enforces restricted record namespaces before writing snapshots to R2", async
   expect((await bindings.ARTIFACTS.list()).objects.map((o) => o.key)).toEqual(
     before,
   );
+});
+
+it("reports each revision's principal and credential through the real Worker, stable across rotation", async () => {
+  const { projectId, request: legacyRequest } = await fixture();
+  const store = new CredentialStore(bindings.DB);
+  const admin = { principalId: "fixture" };
+  const service = await store.createService(
+    projectId,
+    { name: "deployer", display_name: "Deployer", role: "participant" },
+    admin,
+  );
+  const policy: CredentialPolicy = {
+    role: "participant",
+    capabilities: ["records:read", "records:write"],
+  };
+  const first = await generateToken();
+  const issued = await store.issue(
+    {
+      projectId,
+      principalId: service.principal_id,
+      name: "deploy-key",
+      tokenHash: await hashToken(first, bindings.HASH_PEPPER),
+      policy,
+    },
+    admin,
+  );
+  const as =
+    (token: string) => (path: string, body?: unknown, method?: string) =>
+      SELF.fetch(`https://worker/projects/${projectId}${path}`, {
+        method: method ?? (body === undefined ? "GET" : "POST"),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tila-Participant-Id": "deployer",
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+
+  const created = await mutation(
+    await as(first)("/records/revision", {
+      key: "main",
+      value: { region: "eu" },
+    }),
+    201,
+  );
+
+  // Rotate the same credential: a new token ID under the same name.
+  const second = await generateToken();
+  const rotated = await store.rotate(
+    projectId,
+    "deploy-key",
+    issued.token_id,
+    await hashToken(second, bindings.HASH_PEPPER),
+    3600,
+    admin,
+  );
+  expect(rotated.token_id).not.toBe(issued.token_id);
+  expect(rotated.principal_id).toBe(service.principal_id);
+  await mutation(
+    await as(second)(
+      "/records/revision/main",
+      { value: { region: "us" }, fence: created.fence },
+      "PUT",
+    ),
+  );
+  // An earlier project token (no principal of its own) writes a third.
+  const legacy = await mutation(
+    await legacyRequest("/records/revision/~/put/main", {
+      value: { region: "ap" },
+    }),
+  );
+  expect(legacy.revision).toBe(3);
+
+  type Authored = {
+    revision: number;
+    actor: string;
+    principal_id: string | null;
+    token_id: string | null;
+  };
+  const history = await (
+    await as(second)("/records/revision/~/history/main")
+  ).json<{ items: Authored[] }>();
+  const [third, secondRevision, firstRevision] = history.items;
+
+  expect(firstRevision).toMatchObject({
+    revision: 1,
+    principal_id: service.principal_id,
+    token_id: issued.token_id,
+  });
+  expect(secondRevision).toMatchObject({
+    revision: 2,
+    principal_id: service.principal_id,
+    token_id: rotated.token_id,
+  });
+  // Same service, same display name; only the token tells them apart.
+  expect(secondRevision.actor).toBe(firstRevision.actor);
+  // The legacy token has its own principal and token, distinct from the service.
+  expect(third.revision).toBe(3);
+  expect(third.principal_id).not.toBe(service.principal_id);
+  expect(third.principal_id).toBe(`token:${third.token_id}`);
 });
 
 it("keeps a write-only record credential to a receipt and refuses reads before any snapshot write", async () => {

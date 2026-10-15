@@ -587,6 +587,8 @@ export const recordRevisions = sqliteTable(
     token_id: text("token_id"),
     source: text("source"),
     source_version: text("source_version"),
+    /** Authenticated author (migration 43); NULL for earlier revisions. */
+    principal_id: text("principal_id"),
   },
   (table) => [
     primaryKey({ columns: [table.type, table.key, table.revision] }),

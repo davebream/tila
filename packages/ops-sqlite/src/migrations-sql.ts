@@ -1671,6 +1671,19 @@ INSERT OR IGNORE INTO _config_revision_seq (singleton, value) VALUES (1, 1);
 `);
 }
 
+/**
+ * #530: the authenticated principal that authored each record revision, beside
+ * the `token_id` and display `actor` already stored. Additive and idempotent.
+ * Revisions written earlier keep NULL: neither the journal nor a timestamp
+ * identifies a revision's author unambiguously, so nothing is inferred.
+ */
+function runMigration0043(storage: MigrationStorage): void {
+  if (!columnExists(storage, "record_revisions", "principal_id"))
+    storage.sql.exec(
+      "ALTER TABLE record_revisions ADD COLUMN principal_id TEXT DEFAULT NULL",
+    );
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1728,6 +1741,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
   { version: 40, run: runMigration0040 },
   { version: 41, run: runMigration0041 },
   { version: 42, run: runMigration0042 },
+  { version: 43, run: runMigration0043 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */
