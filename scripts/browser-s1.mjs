@@ -869,7 +869,6 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
 fields = [{ name = "title", type = "string", required = true }]
 
 [work_units.bug]
-fields = []
 
 [artifacts.api_plan]
 mime_types = ["text/markdown"]
