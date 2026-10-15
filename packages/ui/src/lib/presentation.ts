@@ -52,6 +52,31 @@ export function taskState(
   return status ? { value: status, variant: "gray" } : null;
 }
 
+/**
+ * The states a declared type names, for offering as filter options: its
+ * lifecycle's states and the values its state field allows, or the allowed
+ * `status` values when it declares no lifecycle. An undeclared type names none.
+ */
+export function declaredStates(entry: WorkCatalogEntry | undefined): string[] {
+  const definition = entry?.definition;
+  if (!definition) return [];
+  const lifecycle = definition.lifecycle;
+  const field = lifecycle?.field ?? "status";
+  const allowed = definition.fields.find((f) => f.name === field)?.values ?? [];
+  const named = lifecycle
+    ? [
+        ...lifecycle.dispatchable,
+        ...lifecycle.terminal,
+        ...lifecycle.dependency_satisfied,
+        ...(lifecycle.on_start ? [lifecycle.on_start] : []),
+        ...Object.values(lifecycle.outcomes ?? {}),
+      ]
+    : [];
+  return [...new Set([...allowed, ...named])].filter(
+    (state) => state.trim().length > 0,
+  );
+}
+
 /** Title per the type's presentation metadata, or the documented fallback. */
 export function taskTitle(
   data: Record<string, unknown> | null | undefined,

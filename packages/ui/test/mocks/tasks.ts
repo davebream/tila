@@ -43,14 +43,18 @@ export function manyTasks(count: number): TaskFixture[] {
 export type ListScope = { restricted: boolean };
 
 /**
- * `GET /tasks` honouring `type`, `archived=0`, `limit` and opaque keyset
- * cursors bound to the filter they were issued for, like the server. A cursor
- * reused with a different filter or sort is a 400 `invalid-cursor`.
+ * `GET /tasks` honouring `type`, `archived=0`, `state`, `limit` and opaque
+ * keyset cursors bound to the filter they were issued for, like the server. A
+ * cursor reused with a different filter or sort is a 400 `invalid-cursor`.
+ *
+ * A task's state is read from `stateFields[type]`, else `status`, as the
+ * server reads a lifecycle field; `sort=state` orders by it, no state first.
  */
 export function pagedTasksHandler(
   tasks: TaskFixture[],
   opts: {
     scope?: ListScope;
+    stateFields?: Record<string, string>;
     onRequest?: (params: URLSearchParams) => void;
   } = {},
 ) {
@@ -59,12 +63,29 @@ export function pagedTasksHandler(
     opts.onRequest?.(params);
     const types = params.get("type")?.split(",").filter(Boolean) ?? [];
     const excludeArchived = params.get("archived") === "0";
-    const binding = `${types.join(",")}|${params.get("archived") ?? ""}|${params.get("sort") ?? ""}:${params.get("order") ?? ""}`;
-    const filtered = tasks.filter(
-      (t) =>
+    const states = params.get("state")?.split(",").filter(Boolean) ?? [];
+    const stateOf = (t: TaskFixture): string | null => {
+      const value = t.data[opts.stateFields?.[t.type] ?? "status"];
+      return typeof value === "string" && value.trim() ? value : null;
+    };
+    const binding = `${types.join(",")}|${params.get("archived") ?? ""}|${params.get("sort") ?? ""}:${params.get("order") ?? ""}${states.length > 0 ? `|state=${states.join(",")}` : ""}`;
+    const filtered = tasks.filter((t) => {
+      const state = stateOf(t);
+      return (
         (types.length === 0 || types.includes(t.type)) &&
-        (!excludeArchived || t.archived === 0),
-    );
+        (!excludeArchived || t.archived === 0) &&
+        (states.length === 0 || (state !== null && states.includes(state)))
+      );
+    });
+    if (params.get("sort") === "state") {
+      const direction = params.get("order") === "desc" ? -1 : 1;
+      filtered.sort((a, b) => {
+        const left = stateOf(a) ?? "";
+        const right = stateOf(b) ?? "";
+        if (left !== right) return left < right ? -direction : direction;
+        return a.id < b.id ? -direction : direction;
+      });
+    }
     const limit = Number(params.get("limit") ?? "100");
     let offset = 0;
     const cursor = params.get("cursor");

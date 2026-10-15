@@ -1,5 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { LifecycleOutcomeSchema, ListCursorSchema } from "@tila/schemas";
+import {
+  LifecycleOutcomeSchema,
+  ListCursorSchema,
+  TASK_LIST_SORTS,
+  TaskStateSchema,
+} from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
@@ -66,6 +71,20 @@ function registerCrudTools(
         .min(1)
         .optional()
         .describe("Match states declared for these lifecycle outcomes"),
+      state: z
+        .array(TaskStateSchema)
+        .min(1)
+        .optional()
+        .describe(
+          "Only tasks in one of these states: the value of each type's lifecycle field, or status for a type with no lifecycle. Exact match across every type.",
+        ),
+      sort: z
+        .enum(TASK_LIST_SORTS)
+        .optional()
+        .describe(
+          "Sort key; state orders by the same state the state filter matches. Ties break by id.",
+        ),
+      order: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
       limit: z
         .number()
         .int()
@@ -74,7 +93,7 @@ function registerCrudTools(
         .optional()
         .describe("Maximum results in this page"),
       cursor: ListCursorSchema.optional().describe(
-        "next_cursor from the preceding page with the same filters",
+        "next_cursor from the preceding page with the same filters and sort",
       ),
       tag_filter: z
         .array(z.string())
@@ -83,7 +102,18 @@ function registerCrudTools(
           'AND filter: return only tasks with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
-    async ({ type, status, tag_filter, blocked, outcome, limit, cursor }) => {
+    async ({
+      type,
+      status,
+      tag_filter,
+      blocked,
+      outcome,
+      state,
+      sort,
+      order,
+      limit,
+      cursor,
+    }) => {
       try {
         const result = await tasks.list({
           type,
@@ -91,6 +121,9 @@ function registerCrudTools(
           compact: true,
           ...(blocked !== undefined ? { blocked } : {}),
           ...(outcome !== undefined ? { outcome } : {}),
+          ...(state !== undefined ? { state } : {}),
+          ...(sort !== undefined ? { sort } : {}),
+          ...(order !== undefined ? { order } : {}),
           ...(limit !== undefined ? { limit: String(limit) } : {}),
           ...(cursor !== undefined ? { cursor } : {}),
           ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
