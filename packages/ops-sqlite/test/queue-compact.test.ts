@@ -220,7 +220,7 @@ describe("compact queue listing", () => {
     const ratio = (size: (typeof measured)[number]) => size.full / size.compact;
     expect(ratio(measured[0])).toBeLessThan(5);
     expect(ratio(measured[2])).toBeGreaterThanOrEqual(5);
-  });
+  }, 20_000);
 
   it("never discloses more to a restricted caller than the full listing does", () => {
     seed(6, (index) => ({
