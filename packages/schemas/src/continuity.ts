@@ -11,7 +11,11 @@ export const JournalReplayRequestSchema = z.object({
   limit: z.number().int().min(1).max(200).default(100),
 });
 export type JournalReplayRequest = z.input<typeof JournalReplayRequestSchema>;
-export const JournalReplayResponseSchema = JournalResponseSchema.extend({
+// Replay includes archived history and never reports the list's watermark.
+export const JournalReplayResponseSchema = JournalResponseSchema.omit({
+  archived: true,
+  lastArchivedSeq: true,
+}).extend({
   next_after_seq: JournalSequenceSchema,
   through_seq: JournalSequenceSchema,
   has_more: z.boolean(),

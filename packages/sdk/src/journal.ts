@@ -47,6 +47,12 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
       // Worker GET /journal query params: resource (entity id), kind (event
       // kind), after_seq (cursor), limit. These are the names the Worker route
       // actually reads — `entity_id`/`event_kind` were silently ignored.
+      //
+      // Order: without `after_seq` the newest `limit` events come back newest
+      // first. With `after_seq` the next `limit` events after it come back
+      // oldest first; pass the last `seq` as the next `after_seq` until a page
+      // is shorter than `limit`. A cursor below `lastArchivedSeq` returns
+      // `archived: true` with no events: use `replay()` for archived history.
       resource?: string;
       kind?: string;
       client_name?: string;

@@ -26,6 +26,7 @@ import { Link, useSearchParams } from "react-router";
 
 const MAX_ROWS = 500;
 const PRUNE_COUNT = 100;
+const PAGE_SIZE = 100;
 
 const SOURCE_OPTIONS = ["cli", "sdk", "mcp", "dashboard"];
 
@@ -97,6 +98,21 @@ const KIND_GROUPS: FilterGroup[] = [
 ];
 
 const KIND_OPTIONS = KIND_GROUPS.flatMap((g) => g.options);
+
+/**
+ * A journal read: without a cursor the API returns the newest page newest
+ * first; with `after_seq` it returns the next page oldest first. The table is a
+ * chronological tail, so rows are always held and shown in ascending seq order.
+ * `archived` reports that the cursor sits below the archive watermark, so the
+ * live table holds no rows for that range.
+ */
+type JournalListPage = {
+  events: JournalEvent[];
+  archived?: boolean;
+  lastArchivedSeq?: number | null;
+};
+
+const bySeq = (a: { seq: number }, b: { seq: number }) => a.seq - b.seq;
 
 type JournalEvent = {
   seq: number;
@@ -401,7 +417,7 @@ export function JournalPage() {
       filterCorrelation,
       retryKey,
     ],
-    queryFn: async () => {
+    queryFn: async (): Promise<JournalListPage> => {
       const params: {
         event_name?: string;
         correlation_id?: string;
@@ -409,28 +425,26 @@ export function JournalPage() {
         kind?: string[];
         client_name?: string[];
         limit: number;
-      } = { limit: 100 };
+      } = { limit: PAGE_SIZE };
       if (filterEventName) params.event_name = filterEventName;
       if (filterCorrelation) params.correlation_id = filterCorrelation;
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterClientName.length > 0) params.client_name = filterClientName;
-      if (!projectId) return { events: [] as JournalEvent[] };
-      return listJournal(projectId, params) as Promise<{
-        events: JournalEvent[];
-      }>;
+      if (!projectId) return { events: [] };
+      return listJournal(projectId, params) as Promise<JournalListPage>;
     },
     enabled: Boolean(projectId),
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-  // Seed events from initial query result
+  // Seed events from initial query result. The API returns the newest page
+  // newest-first; the table reads oldest to newest, ending at the latest event.
   useEffect(() => {
     if (!initialQuery.data) return;
-    const loaded = initialQuery.data.events;
+    const loaded = [...initialQuery.data.events].sort(bySeq);
     setEvents(loaded);
-    const maxSeq =
-      loaded.length > 0 ? Math.max(...loaded.map((e) => e.seq)) : 0;
+    const maxSeq = loaded.length > 0 ? loaded[loaded.length - 1].seq : 0;
     lastSeqRef.current = maxSeq;
     requestAnimationFrame(() => scrollToBottom());
   }, [initialQuery.data, scrollToBottom]);
@@ -446,7 +460,7 @@ export function JournalPage() {
       filterEventName,
       filterCorrelation,
     ],
-    queryFn: async () => {
+    queryFn: async (): Promise<JournalListPage> => {
       const params: {
         event_name?: string;
         correlation_id?: string;
@@ -455,33 +469,48 @@ export function JournalPage() {
         client_name?: string[];
         after_seq: number;
         limit: number;
-      } = { after_seq: lastSeqRef.current, limit: 100 };
+      } = { after_seq: lastSeqRef.current, limit: PAGE_SIZE };
       if (filterEventName) params.event_name = filterEventName;
       if (filterCorrelation) params.correlation_id = filterCorrelation;
       if (filterResource) params.resource = filterResource;
       if (filterKind.length > 0) params.kind = filterKind;
       if (filterClientName.length > 0) params.client_name = filterClientName;
-      if (!projectId) return { events: [] as JournalEvent[] };
-      return listJournal(projectId, params) as Promise<{
-        events: JournalEvent[];
-      }>;
+      if (!projectId) return { events: [] };
+      return listJournal(projectId, params) as Promise<JournalListPage>;
     },
     enabled: Boolean(projectId) && initialQuery.isSuccess,
     refetchInterval: 3000,
     staleTime: 0,
   });
 
+  const refetchTail = tailQuery.refetch;
+
   // Append tail events to accumulator
   useEffect(() => {
     // RC-4: guard — tailQuery.data is undefined on first render after enabled flips
-    if (!tailQuery.data || tailQuery.data.events.length === 0) return;
-    const incoming = tailQuery.data.events;
+    const page = tailQuery.data;
+    if (!page) return;
+    // A cursor below the archive watermark reads as an empty, archived page.
+    // The tail shows live rows only, so skip past the archived range and read
+    // again instead of polling a range that can never yield rows.
+    if (
+      page.archived &&
+      typeof page.lastArchivedSeq === "number" &&
+      page.lastArchivedSeq > lastSeqRef.current
+    ) {
+      lastSeqRef.current = page.lastArchivedSeq;
+      void refetchTail();
+      return;
+    }
+    if (page.events.length === 0) return;
+    const incoming = page.events;
+    const previousSeq = lastSeqRef.current;
     wasAtBottomRef.current = isAtBottom();
     setEvents((prev) => {
       const existingSeqs = new Set(prev.map((e) => e.seq));
       const fresh = incoming.filter((e) => !existingSeqs.has(e.seq));
       if (fresh.length === 0) return prev;
-      const merged = [...prev, ...fresh];
+      const merged = [...prev, ...fresh].sort(bySeq);
       return merged.length > MAX_ROWS ? merged.slice(PRUNE_COUNT) : merged;
     });
     lastSeqRef.current = Math.max(
@@ -491,7 +520,13 @@ export function JournalPage() {
     if (wasAtBottomRef.current) {
       requestAnimationFrame(() => scrollToBottom());
     }
-  }, [tailQuery.data, scrollToBottom, isAtBottom]);
+    // A full page means more rows may be waiting after the cursor: drain the
+    // burst now rather than one page per poll interval. The cursor must have
+    // advanced, so a server that ignores it cannot spin this loop.
+    if (incoming.length >= PAGE_SIZE && lastSeqRef.current > previousSeq) {
+      void refetchTail();
+    }
+  }, [tailQuery.data, scrollToBottom, isAtBottom, refetchTail]);
 
   const loadError = initialQuery.isError ? initialQuery.error : null;
   const initialLoaded = initialQuery.isSuccess;

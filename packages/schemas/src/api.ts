@@ -522,6 +522,19 @@ export const JournalResponseSchema = z.object({
       data: z.record(z.string(), z.unknown()),
     }),
   ),
+  /**
+   * Set by the Worker's journal list. `true` when the `after_seq` cursor sits
+   * below the archive watermark: those events were moved to cold storage, so an
+   * empty `events` means "archived" (read it with replay), not "caught up".
+   * Optional because the embedded and local backends and older Workers omit it.
+   */
+  archived: z.boolean().optional(),
+  /**
+   * Highest archived `seq`, or `null` before any archival. Same range and
+   * optionality as the other journal sequence numbers (`JournalSequenceSchema`,
+   * which cannot be imported here without a cycle).
+   */
+  lastArchivedSeq: z.number().int().nonnegative().safe().nullable().optional(),
 });
 
 export type JournalResponse = z.infer<typeof JournalResponseSchema>;
