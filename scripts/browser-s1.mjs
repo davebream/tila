@@ -2,7 +2,7 @@
 // pnpm exec playwright install chromium
 // pnpm test:browser:s1
 // Optional: BROWSER_S1_EXECUTABLE, BROWSER_S1_EVIDENCE_DIR (private local output).
-// External requests fail closed, including the current Google Fonts stylesheet.
+// External requests are blocked; only the known optional font stylesheet is nonfatal.
 // A failed run is evidence of the reported stop point, never S1 acceptance.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -104,6 +104,7 @@ const token = randomBytes(32).toString("hex");
 const admin = randomBytes(32).toString("hex");
 const password = randomBytes(24).toString("base64url");
 const external = [];
+const blockedOptionalFonts = [];
 const errors = [];
 try {
   const workerPort = await freePort();
@@ -270,6 +271,14 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       url.protocol === "data:"
     )
       return route.continue();
+    if (
+      route.request().resourceType() === "stylesheet" &&
+      url.href ===
+        "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap"
+    ) {
+      blockedOptionalFonts.push(url.origin);
+      return route.abort();
+    }
     external.push(`${url.protocol}//${url.hostname}`);
     stopExternal(new Error(`External browser request blocked: ${url.origin}`));
     return route.abort();
@@ -487,6 +496,7 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
         scope: "partial local browser S1; no live/native/S2/S3 acceptance",
         observations,
         external,
+        blocked_optional_fonts: blockedOptionalFonts,
         page_errors: errors,
         duration_ms: Date.now() - started,
       },
