@@ -89,6 +89,7 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  RecordMetaResponse,
   RecordMutateResponse,
   RecordPatchRequest,
   RecordPutRequest,
@@ -367,6 +368,12 @@ function createLocalRecordMethods(project: EmbeddedProject) {
       const row = await project.getRecord(type, key);
       if (!row) throw new Error(`Record not found: ${type}/${key}`);
       return toRecordGetResponse(row);
+    },
+
+    async meta(type: string, key: string): Promise<RecordMetaResponse> {
+      const meta = await project.getRecordMeta(type, key);
+      if (!meta) throw new Error(`Record not found: ${type}/${key}`);
+      return okEnvelope({ meta });
     },
 
     async patch(

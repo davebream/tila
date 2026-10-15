@@ -114,6 +114,27 @@ function extractFirstSegment(urlPath: string): string {
 }
 
 /**
+ * `…/records/:type/:key` below the optional `/projects/:id` mount, excluding the
+ * `~` action routes (history, archive, ...), whose second segment is `~`.
+ */
+const RECORD_KEY_PATH =
+  /^(?:\/projects\/[^/]+)?\/records\/[^/]+\/(?!~(?:\/|$))[^/]/;
+
+/**
+ * The metadata-only record read: `GET|HEAD …/records/:type/:key?meta=1`, with
+ * `meta` given once and exactly `1`, which is what the route itself accepts.
+ * Its fence and revision are read to decide whether a cached copy is current
+ * or what fence to write with, so no cache may answer it.
+ */
+export function isRecordMetaRead(method: string, url: URL): boolean {
+  if (method !== "GET" && method !== "HEAD") return false;
+  const meta = url.searchParams.getAll("meta");
+  return (
+    meta.length === 1 && meta[0] === "1" && RECORD_KEY_PATH.test(url.pathname)
+  );
+}
+
+/**
  * Add Cache-Control header to a response, returning a new Response.
  */
 function withCacheControl(res: Response, value: string): Response {
@@ -136,14 +157,22 @@ function withCacheControl(res: Response, value: string): Response {
  */
 export function createCacheMiddleware(): MiddlewareHandler {
   return async (c, next) => {
+    const method = c.req.method;
+    const reqUrl = new URL(c.req.url);
+    const urlPath = reqUrl.pathname;
+    // First, so it holds for every caller and for any future tier of /records:
+    // never read from or written to the Cache API, never stored by a browser
+    // or proxy.
+    if (isRecordMetaRead(method, reqUrl)) {
+      await next();
+      c.header("Cache-Control", "private, no-store");
+      return;
+    }
     if (c.get("credentialPolicy")) {
       await next();
       c.header("Cache-Control", "no-store");
       return;
     }
-    const method = c.req.method;
-    const reqUrl = new URL(c.req.url);
-    const urlPath = reqUrl.pathname;
     if (
       /\/(?:journal\/(?:replay|cursor)|handoffs(?:\/[^/]+)?|reentry)\/?$/.test(
         urlPath,
