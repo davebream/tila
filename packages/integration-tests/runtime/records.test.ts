@@ -1,5 +1,9 @@
 import { SELF, runInDurableObject } from "cloudflare:test";
-import { canonicalJson, canonicalJsonSha256 } from "@tila/schemas";
+import {
+  type CredentialPolicy,
+  canonicalJson,
+  canonicalJsonSha256,
+} from "@tila/schemas";
 import { expect, it } from "vitest";
 import { CredentialStore } from "../../worker/src/d1/credential-store";
 import { generateToken } from "../../worker/src/lib/hash";
@@ -463,8 +467,8 @@ it("reports each revision's principal and credential through the real Worker, st
     { name: "deployer", display_name: "Deployer", role: "participant" },
     admin,
   );
-  const policy = {
-    role: "participant" as const,
+  const policy: CredentialPolicy = {
+    role: "participant",
     capabilities: ["records:read", "records:write"],
   };
   const first = await generateToken();
