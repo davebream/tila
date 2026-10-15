@@ -1,25 +1,50 @@
-import { continuityOps } from "@tila/ops-sqlite";
-import { IdentityContextSchema } from "@tila/schemas";
+import {
+  continuityOps,
+  journalVisibilityOps,
+  readCredentialPolicy,
+} from "@tila/ops-sqlite";
+import { IdentityContextSchema, hasNamespaceRestrictions } from "@tila/schemas";
 import { Hono } from "hono";
+import { createR2JournalArchiveReader } from "../../r2";
+import { jsonError } from "./responses";
 import type { RouterDeps } from "./types";
 
 export function createContinuityRoutes(deps: RouterDeps) {
   const app = new Hono();
   const number = (value: string | undefined) =>
     value === undefined ? undefined : Number(value);
-  app.get("/journal/replay", (c) =>
-    c.json(
-      deps.db.transaction((tx) =>
-        continuityOps.replaySnapshot(tx, {
-          after_seq: Number(c.req.query("after_seq")),
-          through_seq: number(c.req.query("through_seq")),
-          limit: number(c.req.query("limit")),
-          event_name: c.req.query("event_name"),
-          correlation_id: c.req.query("correlation_id"),
-        }),
-      ),
-    ),
-  );
+  app.get("/journal/replay", async (c) => {
+    const input = {
+      after_seq: Number(c.req.query("after_seq")),
+      through_seq: number(c.req.query("through_seq")),
+      limit: number(c.req.query("limit")),
+      event_name: c.req.query("event_name"),
+      correlation_id: c.req.query("correlation_id"),
+    };
+    const policy = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    );
+    // A namespace-restricted credential is answered here, in full: the raw
+    // snapshot holds events it may not read and never leaves the DO for it.
+    if (policy && hasNamespaceRestrictions(policy)) {
+      const projectId = c.req.query("project_id");
+      if (!projectId)
+        return jsonError(c, 400, "bad-request", "project_id is required");
+      return c.json(
+        await journalVisibilityOps.scopedReplay(
+          deps.db,
+          policy,
+          input,
+          deps.artifacts
+            ? createR2JournalArchiveReader(deps.artifacts, projectId)
+            : undefined,
+        ),
+      );
+    }
+    return c.json(
+      deps.db.transaction((tx) => continuityOps.replaySnapshot(tx, input)),
+    );
+  });
   app.get("/journal/cursor", (c) =>
     c.json({
       ok: true,

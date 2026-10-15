@@ -564,6 +564,21 @@ export const JournalResponseSchema = z.object({
    * which cannot be imported here without a cycle).
    */
   lastArchivedSeq: z.number().int().nonnegative().safe().nullable().optional(),
+  /**
+   * Set only for a namespace-restricted reader, whose list examines a bounded
+   * range of sequences. Forward read (`after_seq`): `true` when a readable
+   * event is known to follow or the bound ended the request early, so a page
+   * shorter than `limit` is "caught up" only when this is `false`. Tail read
+   * (no `after_seq`): `true` when the bound ended the request before `limit`
+   * events were found and older readable events may exist.
+   */
+  has_more: z.boolean().optional(),
+  /**
+   * Set only with `has_more`, on a forward read: pass as `after_seq` to
+   * continue. It can move past events the reader may not see; it never moves
+   * past one it may.
+   */
+  next_after_seq: z.number().int().nonnegative().safe().optional(),
 });
 
 export type JournalResponse = z.infer<typeof JournalResponseSchema>;

@@ -62,6 +62,12 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
       // oldest first; pass the last `seq` as the next `after_seq` until a page
       // is shorter than `limit`. A cursor below `lastArchivedSeq` returns
       // `archived: true` with no events: use `replay()` for archived history.
+      //
+      // A namespace-restricted credential sees only the events it may read,
+      // and its response also carries `has_more` (and `next_after_seq` with
+      // `after_seq`). Each request examines a bounded range, so for such a
+      // credential a page shorter than `limit` is "caught up" only when
+      // `has_more` is false: continue from `next_after_seq` while it is true.
       resource?: string;
       kind?: string;
       client_name?: string;

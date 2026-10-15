@@ -10,6 +10,7 @@ import {
   JournalAcknowledgeRequestSchema,
   JournalReplayRequestSchema,
   ReentryRequestSchema,
+  hasNamespaceRestrictions,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -84,15 +85,22 @@ continuity.use("*", async (c, next) => {
 });
 continuity.get("/journal/replay", requirePermission("read"), async (c) => {
   const input = JournalReplayRequestSchema.parse(queryValues(c.req.query()));
+  // A namespace-restricted credential's replay is completed and filtered inside
+  // the DO, against the same policy and state, so no unfiltered snapshot ever
+  // reaches the Worker for it. `project_id` is server-derived, never the query.
+  const policy = c.get("credentialPolicy");
+  const scoped = policy !== undefined && hasNamespaceRestrictions(policy);
   const response = await forwardToDO(
     c.get("doStub"),
     "/journal/replay",
     "GET",
     undefined,
-    strings(input),
+    scoped
+      ? { ...strings(input), project_id: c.get("projectId") }
+      : strings(input),
     analyticsCtxFrom(c),
   );
-  if (!response.ok) return response;
+  if (!response.ok || scoped) return response;
   const snapshot = (await response.json()) as ReplaySnapshot;
   return c.json(
     await completeReplay(

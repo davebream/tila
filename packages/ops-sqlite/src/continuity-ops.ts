@@ -80,6 +80,56 @@ export function acknowledge(
   });
 }
 
+function liveReplayEvents(
+  db: Db,
+  afterSeq: number,
+  throughSeq: number,
+): ReplaySnapshot["events"] {
+  return db
+    .select()
+    .from(schema.journal)
+    .where(
+      and(
+        gt(schema.journal.seq, afterSeq),
+        lte(schema.journal.seq, throughSeq),
+      ),
+    )
+    .orderBy(schema.journal.seq)
+    .all()
+    .map((row) => ({
+      seq: row.seq,
+      t: row.t,
+      kind: row.kind,
+      resource: row.resource,
+      principal_id: row.principal_id,
+      participant_id: row.participant_id,
+      environment: JSON.parse(row.environment),
+      token_id: row.token_id,
+      fence: row.fence,
+      data: JSON.parse(row.data),
+    }));
+}
+
+/**
+ * One unfiltered, unpaged window `(afterSeq, pageThroughSeq]` of the journal,
+ * for callers that choose how many sequences to examine per step. The caller
+ * has already checked the bounds against `highSequence`.
+ */
+export function replayWindow(
+  db: Db,
+  afterSeq: number,
+  pageThroughSeq: number,
+  throughSeq: number,
+): ReplaySnapshot {
+  return {
+    after_seq: afterSeq,
+    through_seq: throughSeq,
+    page_through_seq: pageThroughSeq,
+    archived_through_seq: getArchiveWatermark(db)?.lastArchivedSeq ?? 0,
+    events: liveReplayEvents(db, afterSeq, pageThroughSeq),
+  };
+}
+
 /**
  * Fully materialize the live page inside the transaction, before archive I/O.
  *
@@ -105,34 +155,12 @@ export function replaySnapshot(
   const span = filtered ? JOURNAL_REPLAY_SCAN_BUDGET : query.limit;
   const pageThrough =
     query.after_seq + Math.min(span, through - query.after_seq);
-  const rows = db
-    .select()
-    .from(schema.journal)
-    .where(
-      and(
-        gt(schema.journal.seq, query.after_seq),
-        lte(schema.journal.seq, pageThrough),
-      ),
-    )
-    .orderBy(schema.journal.seq)
-    .all();
   return {
     after_seq: query.after_seq,
     through_seq: through,
     page_through_seq: pageThrough,
     archived_through_seq: getArchiveWatermark(db)?.lastArchivedSeq ?? 0,
-    events: rows.map((row) => ({
-      seq: row.seq,
-      t: row.t,
-      kind: row.kind,
-      resource: row.resource,
-      principal_id: row.principal_id,
-      participant_id: row.participant_id,
-      environment: JSON.parse(row.environment),
-      token_id: row.token_id,
-      fence: row.fence,
-      data: JSON.parse(row.data),
-    })),
+    events: liveReplayEvents(db, query.after_seq, pageThrough),
     ...(filtered && {
       filter: {
         event_name: query.event_name,

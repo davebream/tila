@@ -188,7 +188,7 @@ it("rejects forged identities, missing authentication, cross-project resources a
   expect(journal.events).toHaveLength(1);
 });
 
-it("rechecks scoped authority before retries and denies restricted readers across live and archived paths", async () => {
+it("rechecks scoped authority before retries and keeps restricted credentials from appending or reading reports", async () => {
   const { project, http } = await queueApiFixture();
   const store = new CredentialStore(bindings.DB);
   const actor = { principalId: "fixture" };
@@ -228,12 +228,24 @@ it("rechecks scoped authority before retries and denies restricted readers acros
   const allowed = await issue("allowed");
   expect((await allowed("/journal", input)).status).toBe(200);
   const restricted = await issue("restricted", true);
+  // A restricted reader may read the journal, but never sees a project report:
+  // reports are not entity, claim or record events.
   for (const path of [
     "/journal",
     "/journal?event_name=pipeline.tests_passed",
+    "/journal?kind=custom.reported",
     "/journal/replay?after_seq=0&limit=10",
-  ])
-    expect((await restricted(path)).status).toBe(403);
+    "/journal/replay?after_seq=0&limit=10&event_name=pipeline.tests_passed",
+  ]) {
+    const response = await restricted(path);
+    expect(response.status, path).toBe(200);
+    const body = (await response.json()) as {
+      events: { kind: string; data: Record<string, unknown> }[];
+    };
+    for (const event of body.events)
+      expect(event.kind, path).not.toBe("custom.reported");
+    expect(JSON.stringify(body), path).not.toContain("pipeline.tests_passed");
+  }
   expect((await restricted("/journal", input)).status).toBe(403);
   await store.revoke(project, "allowed", actor);
   expect([401, 403]).toContain((await allowed("/journal", input)).status);
