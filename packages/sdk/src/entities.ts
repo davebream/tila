@@ -11,7 +11,7 @@ import type {
   PaginatedEntityListResponse,
   WorkCatalogResponse,
 } from "@tila/schemas";
-import { LifecycleOutcomeSchema } from "@tila/schemas";
+import { LifecycleOutcomeSchema, TaskStateListSchema } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
 export interface TaskListOptions {
@@ -20,12 +20,27 @@ export interface TaskListOptions {
   limit?: string;
   cursor?: string;
   offset?: string;
-  sort?: "created_at" | "updated_at" | "type" | "title" | "status" | "id";
+  /** `state` orders by the value the Tasks list shows as a task's state. */
+  sort?:
+    | "created_at"
+    | "updated_at"
+    | "type"
+    | "title"
+    | "status"
+    | "state"
+    | "id";
   order?: "asc" | "desc";
   tagFilter?: string[];
   blocked?: boolean;
   /** Non-empty list of lifecycle outcomes declared by task types. */
   outcome?: LifecycleOutcome[];
+  /**
+   * Non-empty list of task states. A task's state is the value of its type's
+   * lifecycle field, or `status` for a type that declares no lifecycle, so one
+   * list matches tasks of every type whatever field holds the state. Exact,
+   * case-sensitive match; a task without a state matches nothing.
+   */
+  state?: string[];
   /** HTTP projection; local mode continues to return full entities. */
   compact?: boolean;
 }
@@ -41,7 +56,8 @@ function _createMethods(client: TilaClient, base: string) {
   ): Promise<PaginatedEntityListResponse>;
   async function list(query?: TaskListOptions): Promise<TaskListResponse>;
   async function list(query?: TaskListOptions): Promise<TaskListResponse> {
-    const { tagFilter, compact, blocked, outcome, ...rest } = query ?? {};
+    const { tagFilter, compact, blocked, outcome, state, ...rest } =
+      query ?? {};
     const q: Record<string, string | undefined> = { ...rest };
     if (tagFilter?.length) q.tag_filter = tagFilter.join(",");
     if (compact) q.compact = "true";
@@ -51,6 +67,8 @@ function _createMethods(client: TilaClient, base: string) {
         .min(1)
         .parse(outcome)
         .join(",");
+    if (state !== undefined)
+      q.state = TaskStateListSchema.parse(state).join(",");
     return client.get<TaskListResponse>(base, { query: q });
   }
   return {
