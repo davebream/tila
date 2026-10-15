@@ -257,13 +257,19 @@ export function checkArtifactRelationshipTypeDeclared(
 export function checkRecordTypeDeclared(
   schema: TilaSchemaToml,
   recordType: string,
+  /** `false` leaves the other declared types out of the message. */
+  options: { listDeclared?: boolean } = {},
 ): ConstraintResult {
   const records = schema.records ?? {};
   if (!(recordType in records)) {
+    const declared =
+      options.listDeclared === false
+        ? ""
+        : ` Declared types: ${Object.keys(records).join(", ") || "(none)"}`;
     return {
       ok: false,
       code: "constraint-violation",
-      message: `Record type "${recordType}" is not declared in records. Declared types: ${Object.keys(records).join(", ") || "(none)"}`,
+      message: `Record type "${recordType}" is not declared in records.${declared}`,
     };
   }
   return { ok: true };

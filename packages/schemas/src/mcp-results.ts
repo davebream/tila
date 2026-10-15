@@ -263,8 +263,8 @@ export const McpPrimitiveResults = {
   tila_artifact_review: ArtifactReviewResponseSchema,
   tila_search: api.UnifiedSearchResponseSchema,
   tila_record_get: api.RecordGetResponseSchema,
-  tila_record_set: api.RecordMutateResponseSchema,
-  tila_record_put: api.RecordMutateResponseSchema,
+  tila_record_set: api.RecordWriteResponseSchema,
+  tila_record_put: api.RecordWriteResponseSchema,
   tila_record_patch: api.RecordMutateResponseSchema,
   tila_record_list: api.RecordListResponseSchema,
   tila_record_archive: api.RecordMutateResponseSchema,
@@ -327,6 +327,7 @@ export const McpWorkflowResults = {
   tila_publish: z.union([
     api.EntityResponseSchema,
     api.RecordMutateResponseSchema,
+    api.RecordWriteReceiptResponseSchema,
     api.ArtifactPutResponseSchema,
   ]),
   tila_signal: z.union([

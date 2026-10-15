@@ -20,13 +20,20 @@ import {
   RecordSetRequestSchema,
   RecordUnarchiveRequestSchema,
   RecordValueSchema,
+  canEchoStoredRecord,
+  hasRecordRestrictions,
+  okEnvelope,
   parseTagFilter,
 } from "@tila/schemas";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { ZodError } from "zod";
 import { originFromBody } from "./origin";
 import { idempotencyFrom, jsonError, jsonOkRows } from "./responses";
-import type { ProjectSubRouter, RouterDeps } from "./types";
+import {
+  type ProjectSubRouter,
+  type RouterDeps,
+  WITHHOLD_RECORD_DETAIL_KEY,
+} from "./types";
 
 const { checkRecordTypeDeclared, resolveCurrentSchema } = constraintOps;
 
@@ -44,6 +51,45 @@ function serializeRecord(result: recordOps.RecordRow) {
     updated_by: result.updated_by,
     tags: result.tags,
   };
+}
+
+/**
+ * Response for `create`, `set` and `put`. A split policy that may write but
+ * not read the key gets a receipt: the replace branch reads the stored row
+ * back, and every field of the result row is stored or derived server-side
+ * (including the actor and the schema version), so none of it is returned.
+ * The receipt repeats the record the caller addressed and the fence a later
+ * fenced write needs. Every other caller keeps the full record.
+ */
+function serializeWriteResponse(
+  c: Context,
+  target: { type: string; key: string },
+  result: recordOps.RecordRow,
+) {
+  const policy = readCredentialPolicy(c.req.header("X-Tila-Credential-Policy"));
+  if (
+    policy === undefined ||
+    canEchoStoredRecord(policy, target.type, target.key)
+  )
+    return {
+      record: serializeRecord(result),
+      fence: result.fence,
+      revision: result.revision,
+    };
+  return {
+    receipt: true,
+    type: target.type,
+    key: target.key,
+    fence: result.fence,
+  };
+}
+
+function withholdsDetail(c: Context): boolean {
+  return (
+    (c.get as (k: string) => boolean | undefined)(
+      WITHHOLD_RECORD_DETAIL_KEY,
+    ) === true
+  );
 }
 
 type ValidateRecordWriteResult =
@@ -64,6 +110,7 @@ function validateRecordWrite(
   deps: RouterDeps,
   type: string,
   value: Record<string, unknown>,
+  withholdDetail: boolean,
 ): ValidateRecordWriteResult {
   const currentSchema = resolveCurrentSchema(deps.db);
   const schemaVersion = currentSchema
@@ -71,7 +118,9 @@ function validateRecordWrite(
     : 0;
 
   if (currentSchema) {
-    const typeCheck = checkRecordTypeDeclared(currentSchema, type);
+    const typeCheck = checkRecordTypeDeclared(currentSchema, type, {
+      listDeclared: !withholdDetail,
+    });
     if (!typeCheck.ok) {
       return {
         ok: false,
@@ -114,7 +163,12 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       "anonymous";
     const provenance = originFromBody(rawBody);
 
-    const validation = validateRecordWrite(deps, type, body.value);
+    const validation = validateRecordWrite(
+      deps,
+      type,
+      body.value,
+      withholdsDetail(c),
+    );
     if (!validation.ok) {
       return jsonError(
         c,
@@ -148,12 +202,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
 
     c.header("X-Rows-Affected", "1");
     return c.json(
-      {
-        ok: true,
-        record: serializeRecord(result),
-        fence: result.fence,
-        revision: result.revision,
-      },
+      okEnvelope(serializeWriteResponse(c, { type, key: body.key }, result)),
       201,
     );
   });
@@ -168,7 +217,12 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       "anonymous";
     const setProvenance = originFromBody(rawSetBody);
 
-    const validation = validateRecordWrite(deps, type, body.value);
+    const validation = validateRecordWrite(
+      deps,
+      type,
+      body.value,
+      withholdsDetail(c),
+    );
     if (!validation.ok) {
       return jsonError(
         c,
@@ -202,15 +256,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       idempotencyFrom(c),
     );
 
-    return jsonOkRows(
-      c,
-      {
-        record: serializeRecord(result),
-        fence: result.fence,
-        revision: result.revision,
-      },
-      1,
-    );
+    return jsonOkRows(c, serializeWriteResponse(c, { type, key }, result), 1);
   });
 
   // Fenceless create-or-replace (upsert). Registered before the generic
@@ -239,7 +285,12 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       "anonymous";
     const putProvenance = originFromBody(rawPutBody);
 
-    const validation = validateRecordWrite(deps, type, body.value);
+    const validation = validateRecordWrite(
+      deps,
+      type,
+      body.value,
+      withholdsDetail(c),
+    );
     if (!validation.ok) {
       return jsonError(
         c,
@@ -267,15 +318,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
       putProvenance,
     );
 
-    return jsonOkRows(
-      c,
-      {
-        record: serializeRecord(result),
-        fence: result.fence,
-        revision: result.revision,
-      },
-      1,
-    );
+    return jsonOkRows(c, serializeWriteResponse(c, { type, key }, result), 1);
   });
 
   app.post("/record/:type/:key{.+}/patch", async (c) => {
@@ -548,7 +591,7 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
           limit: limit ?? 200,
           next_cursor: result.next_cursor,
           scope: {
-            restricted: restrictions?.records !== undefined,
+            restricted: hasRecordRestrictions(restrictions),
             archived: includeArchived ? "included" : "excluded",
           },
         },

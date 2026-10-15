@@ -1,3 +1,4 @@
+import { isRecordWriteReceipt } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TilaClient } from "../client";
 import {
@@ -249,6 +250,34 @@ describe("namespacedRecordMethods", () => {
     vi.unstubAllGlobals();
   });
 
+  it("strips the namespace from a write receipt, which names the record at the top level", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockResponse({
+        ok: true,
+        receipt: true,
+        type: "cp_config",
+        key: "db",
+        fence: 3,
+      }),
+    );
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    const records = namespacedRecordMethods(client, PROJECT_ID, NS);
+
+    const result = await records.create("config", {
+      key: "db",
+      value: { host: "x" },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      receipt: true,
+      type: "config",
+      key: "db",
+      fence: 3,
+    });
+    expect(isRecordWriteReceipt(result)).toBe(true);
+  });
+
   function baseRecord(type = "cp_config") {
     return {
       type,
@@ -281,6 +310,7 @@ describe("namespacedRecordMethods", () => {
 
     const [url] = mockFetch.mock.calls[0];
     expect(url).toContain(`/projects/${PROJECT_ID}/records/cp_config`);
+    if (isRecordWriteReceipt(result)) throw new Error("expected a record");
     expect(result.record.type).toBe("config");
   });
 
@@ -703,6 +733,7 @@ describe("createNamespace", () => {
 
     const [url] = mockFetch.mock.calls[0];
     expect(url).toContain("/records/cp_config");
+    if (isRecordWriteReceipt(result)) throw new Error("expected a record");
     expect(result.record.type).toBe("config");
   });
 
@@ -742,6 +773,7 @@ describe("createNamespace", () => {
     });
 
     // Wire value was cp_config (valid), stripped to config on return
+    if (isRecordWriteReceipt(result)) throw new Error("expected a record");
     expect(result.record.type).toBe("config");
   });
 });

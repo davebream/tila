@@ -123,9 +123,13 @@ export function namespacedRecordMethods(
 ) {
   const inner = createRecordMethods(client, projectId);
 
-  function stripRecordType<T extends { record: { type: string } }>(
-    result: T,
-  ): T {
+  // A write receipt names the record at the top level; every other record
+  // response nests it under `record`.
+  function stripRecordType<
+    T extends { record: { type: string } } | { receipt: true; type: string },
+  >(result: T): T {
+    if ("receipt" in result)
+      return { ...result, type: stripPrefix(ns, result.type) };
     return {
       ...result,
       record: { ...result.record, type: stripPrefix(ns, result.record.type) },

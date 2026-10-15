@@ -1944,6 +1944,8 @@ expiry and legacy status. `GET /api/tokens` also returns logical/version IDs, po
 effective policy, status, expiry and version retirement deadlines, without secrets.
 
 Absent namespace restrictions mean unrestricted; empty arrays grant nothing.
+Record rules can also limit reading and writing separately, as described under
+[Record read and write restrictions](#record-read-and-write-restrictions-530).
 Task types match exactly. Record prefix `team/a` permits that key and descendants
 such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
 pagination, so a restricted listing that is empty cannot be told apart from one
@@ -1961,6 +1963,53 @@ require explicit delete capabilities. A service promotion cannot expand a key's
 issuance ceiling; demotions and revocations immediately reduce current authority.
 To remove what an automated run created without widening its key, see
 [Cleaning up automated run resources](#cleaning-up-automated-run-resources-362).
+
+### Record read and write restrictions (#530)
+
+`restrictions.records` keeps its meaning: one rule list that applies to reading
+and writing alike. To give a key different reach on each side, use
+`records_read` and `records_write` instead, with the same rule shape
+(`{"type": ..., "key_prefixes": [...]}`):
+
+```sh
+# Reads answer/a1/..., writes question/q1/... and nothing else.
+tila token issue --name worker --principal 'service:<uuid>' --role participant \
+  --capabilities records:read,records:write,claims:read,claims:acquire,claims:renew,claims:release \
+  --restrictions '{"records_read":[{"type":"answer","key_prefixes":["a1"]}],"records_write":[{"type":"question","key_prefixes":["q1"]}]}' --json
+```
+
+- `records` cannot be combined with `records_read` or `records_write`; a policy
+  that does is rejected when it is issued, stored or imported.
+- As soon as either split field is present, the side that is not listed denies
+  every record. `"records_read": []` and a missing `records_read` both read
+  nothing.
+- A policy that sets only one side is still a restricted credential: it is
+  limited to the same surfaces as any other namespace restriction.
+- Reading covers `GET /records/:type/:key`, `~/history`, listing and counts,
+  the record catalog, record search and claim state or listing. Writing covers
+  create, set, put, patch, archive, unarchive and acquiring, renewing or
+  releasing a claim on `record:<type>/<key>`.
+- The catalog (`GET /records/_types`) lists only the types a credential may
+  read, so a write-only credential sees none. Search and claim listings omit
+  everything the read side does not admit.
+- A write must not tell the caller what it could not have read. Patch, archive
+  and unarchive return the stored record, so they also need the read side of the
+  same key. Create, set and put from a credential that may write but not read
+  the key return a receipt (`ok`, `receipt: true`, `type`, `key`, `fence`) and
+  nothing else: no value, tags, archived flag, timestamps, author or revision.
+  The fence is what a later fenced write needs. A stale fence reports only that
+  the fence is stale, and an undeclared record type does not list the project's
+  other types. Whether a key exists is still visible to a writer, because create
+  conflicts and set needs an existing record.
+- Delegation and narrowing treat the sides independently: a derived credential,
+  session, run ceiling, workload binding or imported policy can never read or
+  write more than its parent on either side.
+
+Upgrade note: policies that use `records_read` or `records_write` cannot be
+parsed by a Worker from before this change, because policy objects are strict.
+That Worker rejects them and the credential has no access; it does not fall back
+to broader access. Deploy the Worker before issuing such credentials, and
+reissue them as `records` policies if you roll back.
 
 ### Expiry, rotation and revocation
 

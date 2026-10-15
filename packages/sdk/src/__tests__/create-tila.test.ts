@@ -10,7 +10,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TilaProjectConfig } from "@tila/schemas";
+import { type TilaProjectConfig, isRecordWriteReceipt } from "@tila/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTila, isTilaApiError } from "../client";
 
@@ -89,6 +89,8 @@ describe("createTila — local backend", () => {
       key: "k1",
       value: { body: "v1" },
     });
+    // A local project has no read restrictions, so a write returns the record.
+    if (isRecordWriteReceipt(created)) throw new Error("expected a record");
     expect(created.ok).toBe(true);
     expect(created.record.key).toBe("k1");
 
@@ -96,6 +98,7 @@ describe("createTila — local backend", () => {
       value: { body: "v2" },
       fence: created.fence,
     });
+    if (isRecordWriteReceipt(set)) throw new Error("expected a record");
     expect(set.record.value).toMatchObject({ body: "v2" });
 
     const acquired = await tila.claims.acquire("res-1", "exclusive", 30_000);

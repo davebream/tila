@@ -103,22 +103,47 @@ export function permissionToRole(
       : "maintainer";
 }
 
+/** One record namespace rule: a type, optionally narrowed to key prefixes. */
+export const RecordRestrictionRuleSchema = z
+  .object({
+    type: RecordTypeSchema,
+    key_prefixes: z.array(RecordKeySchema).max(100).optional(),
+  })
+  .strict();
+export type RecordRestrictionRule = z.infer<typeof RecordRestrictionRuleSchema>;
+const RecordRestrictionRulesSchema = z
+  .array(RecordRestrictionRuleSchema)
+  .max(100);
+
+/**
+ * Record namespace restrictions come in two mutually exclusive forms:
+ *
+ * - `records` (legacy): one rule list that governs reads and writes alike.
+ * - `records_read` / `records_write` (split): independent rule lists. Once
+ *   either is present, the side that is not listed denies every record, and an
+ *   empty list denies every record on its side.
+ *
+ * Absence of all three leaves records unrestricted.
+ */
 export const NamespaceRestrictionsSchema = z
   .object({
     task_types: z.array(z.string().min(1)).max(100).optional(),
-    records: z
-      .array(
-        z
-          .object({
-            type: RecordTypeSchema,
-            key_prefixes: z.array(RecordKeySchema).max(100).optional(),
-          })
-          .strict(),
-      )
-      .max(100)
-      .optional(),
+    records: RecordRestrictionRulesSchema.optional(),
+    records_read: RecordRestrictionRulesSchema.optional(),
+    records_write: RecordRestrictionRulesSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (restrictions) =>
+      restrictions.records === undefined ||
+      (restrictions.records_read === undefined &&
+        restrictions.records_write === undefined),
+    {
+      message:
+        "restrictions.records cannot be combined with records_read or records_write",
+      path: ["records"],
+    },
+  );
 export type NamespaceRestrictions = z.infer<typeof NamespaceRestrictionsSchema>;
 export const CredentialPolicySchema = z
   .object({
@@ -271,14 +296,42 @@ export function permitsTask(
     restrictions.task_types.includes(type)
   );
 }
-export function permitsRecord(
+
+/** Which side of the record namespace an operation exercises. */
+export type RecordAccessSide = "read" | "write";
+
+/**
+ * The only HTTP methods that read. Every layer that maps a request to a side
+ * uses this, so the Worker and the Durable Object cannot disagree on HEAD.
+ */
+export function isReadMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD";
+}
+
+/**
+ * The rule list in force for one side: `undefined` means unrestricted and an
+ * empty list denies every record. A split policy denies the side it omits, and
+ * a hand-built policy that mixes both forms denies everything (it cannot be
+ * parsed, so this is only a fail-closed backstop).
+ */
+export function recordRulesForSide(
   restrictions: NamespaceRestrictions | undefined,
+  side: RecordAccessSide,
+): RecordRestrictionRule[] | undefined {
+  if (restrictions === undefined) return undefined;
+  const { records, records_read, records_write } = restrictions;
+  if (records_read === undefined && records_write === undefined) return records;
+  if (records !== undefined) return [];
+  return (side === "read" ? records_read : records_write) ?? [];
+}
+function recordRulesPermit(
+  rules: readonly RecordRestrictionRule[] | undefined,
   type: string,
   key: string,
 ): boolean {
   return (
-    restrictions?.records === undefined ||
-    restrictions.records.some(
+    rules === undefined ||
+    rules.some(
       (rule) =>
         rule.type === type &&
         (rule.key_prefixes === undefined ||
@@ -288,10 +341,96 @@ export function permitsRecord(
     )
   );
 }
+export function permitsRecordSide(
+  restrictions: NamespaceRestrictions | undefined,
+  side: RecordAccessSide,
+  type: string,
+  key: string,
+): boolean {
+  return recordRulesPermit(recordRulesForSide(restrictions, side), type, key);
+}
+export function permitsRecordRead(
+  restrictions: NamespaceRestrictions | undefined,
+  type: string,
+  key: string,
+): boolean {
+  return permitsRecordSide(restrictions, "read", type, key);
+}
+export function permitsRecordWrite(
+  restrictions: NamespaceRestrictions | undefined,
+  type: string,
+  key: string,
+): boolean {
+  return permitsRecordSide(restrictions, "write", type, key);
+}
+/**
+ * True only when both sides permit the record. Enforcement must use the
+ * side-specific predicates; this stays for display code that needs one answer.
+ */
+export function permitsRecord(
+  restrictions: NamespaceRestrictions | undefined,
+  type: string,
+  key: string,
+): boolean {
+  return (
+    permitsRecordRead(restrictions, type, key) &&
+    permitsRecordWrite(restrictions, type, key)
+  );
+}
+/**
+ * The record a `record:<type>/<key>` claim resource names, or `undefined` when
+ * the resource is not a record resource or does not name a type.
+ */
+export function recordResourceTarget(
+  resource: string,
+): { type: string; key: string } | undefined {
+  if (!resource.startsWith("record:")) return undefined;
+  const rest = resource.slice("record:".length);
+  const slash = rest.indexOf("/");
+  if (slash < 1) return undefined;
+  return { type: rest.slice(0, slash), key: rest.slice(slash + 1) };
+}
+/** Any record restriction, legacy or split, is present. */
+export function hasRecordRestrictions(
+  restrictions: NamespaceRestrictions | undefined,
+): boolean {
+  return (
+    restrictions?.records !== undefined ||
+    restrictions?.records_read !== undefined ||
+    restrictions?.records_write !== undefined
+  );
+}
+/** The split (`records_read` / `records_write`) form is in use. */
+export function hasSplitRecordRestrictions(
+  restrictions: NamespaceRestrictions | undefined,
+): boolean {
+  return (
+    restrictions?.records_read !== undefined ||
+    restrictions?.records_write !== undefined
+  );
+}
+/**
+ * Whether the response to a record write may carry what is stored under the
+ * record. A split policy that cannot read the key must not learn through a
+ * write what a read would have refused, so it needs the read capability and
+ * the read side to admit the key. Every other policy keeps the response it
+ * always had.
+ */
+export function canEchoStoredRecord(
+  policy: CredentialPolicy,
+  type: string,
+  key: string,
+): boolean {
+  if (!hasSplitRecordRestrictions(policy.restrictions)) return true;
+  return (
+    policy.capabilities.includes("records:read") &&
+    permitsRecordRead(policy.restrictions, type, key)
+  );
+}
 export function hasNamespaceRestrictions(policy: CredentialPolicy): boolean {
   return (
     policy.restrictions?.task_types !== undefined ||
-    policy.restrictions?.records !== undefined
+    hasRecordRestrictions(policy.restrictions)
   );
 }
 
@@ -330,22 +469,41 @@ export function policyContains(
       c.task_types.some((type) => !p.task_types?.includes(type)))
   )
     return false;
-  if (p?.records !== undefined) {
-    if (c?.records === undefined) return false;
-    for (const rule of c.records) {
-      if (rule.key_prefixes === undefined) {
-        if (
-          !p.records.some(
-            (allowed) =>
-              allowed.type === rule.type && allowed.key_prefixes === undefined,
-          )
+  // Each side must be contained on its own: a child may not trade a narrower
+  // read side for a wider write side, or the reverse.
+  for (const side of ["read", "write"] as const)
+    if (
+      !recordRulesContain(
+        recordRulesForSide(p, side),
+        recordRulesForSide(c, side),
+      )
+    )
+      return false;
+  return true;
+}
+
+/** Every record the child rules admit is admitted by the parent rules. */
+function recordRulesContain(
+  parent: readonly RecordRestrictionRule[] | undefined,
+  child: readonly RecordRestrictionRule[] | undefined,
+): boolean {
+  if (parent === undefined) return true;
+  if (child === undefined) return false;
+  for (const rule of child) {
+    if (rule.key_prefixes === undefined) {
+      if (
+        !parent.some(
+          (allowed) =>
+            allowed.type === rule.type && allowed.key_prefixes === undefined,
         )
-          return false;
-      } else if (
-        rule.key_prefixes.some((prefix) => !permitsRecord(p, rule.type, prefix))
       )
         return false;
-    }
+    } else if (
+      rule.key_prefixes.some(
+        (prefix) => !recordRulesPermit(parent, rule.type, prefix),
+      )
+    )
+      return false;
   }
   return true;
 }
@@ -427,39 +585,32 @@ export function intersectCredentialPolicies(
 ): CredentialPolicy {
   const tasksA = a.restrictions?.task_types;
   const tasksB = b.restrictions?.task_types;
-  const recordsA = a.restrictions?.records;
-  const recordsB = b.restrictions?.records;
-  const records =
-    recordsA === undefined
-      ? recordsB
-      : recordsB === undefined
-        ? recordsA
-        : recordsA.flatMap((left) =>
-            recordsB
-              .filter((right) => right.type === left.type)
-              .map((right) => {
-                const key_prefixes =
-                  left.key_prefixes === undefined
-                    ? right.key_prefixes
-                    : right.key_prefixes === undefined
-                      ? left.key_prefixes
-                      : left.key_prefixes.flatMap((x) =>
-                          (right.key_prefixes ?? []).flatMap((y) =>
-                            x === y || x.startsWith(`${y}/`)
-                              ? [x]
-                              : y.startsWith(`${x}/`)
-                                ? [y]
-                                : [],
-                          ),
-                        );
-                return {
-                  type: left.type,
-                  ...(key_prefixes === undefined
-                    ? {}
-                    : { key_prefixes: [...new Set(key_prefixes)] }),
-                };
-              }),
-          );
+  const read = intersectRecordRules(
+    recordRulesForSide(a.restrictions, "read"),
+    recordRulesForSide(b.restrictions, "read"),
+  );
+  const write = intersectRecordRules(
+    recordRulesForSide(a.restrictions, "write"),
+    recordRulesForSide(b.restrictions, "write"),
+  );
+  // Equal sides keep the legacy single-list form, so a policy that never used
+  // the split fields narrows to exactly the policy it always narrowed to.
+  // Otherwise each side is emitted on its own; a side that is not emitted is
+  // denied, so this can only ever narrow.
+  const records: Pick<
+    NamespaceRestrictions,
+    "records" | "records_read" | "records_write"
+  > =
+    read === undefined && write === undefined
+      ? {}
+      : read !== undefined &&
+          write !== undefined &&
+          JSON.stringify(read) === JSON.stringify(write)
+        ? { records: read }
+        : {
+            ...(read === undefined ? {} : { records_read: read }),
+            ...(write === undefined ? {} : { records_write: write }),
+          };
   const task_types =
     tasksA === undefined
       ? tasksB
@@ -479,7 +630,42 @@ export function intersectCredentialPolicies(
     ...policy,
     restrictions: {
       ...(task_types === undefined ? {} : { task_types }),
-      ...(records === undefined ? {} : { records }),
+      ...records,
     },
   };
+}
+
+/** `undefined` is unrestricted; the intersection of two rule lists narrows both. */
+function intersectRecordRules(
+  a: readonly RecordRestrictionRule[] | undefined,
+  b: readonly RecordRestrictionRule[] | undefined,
+): RecordRestrictionRule[] | undefined {
+  if (a === undefined) return b?.slice();
+  if (b === undefined) return a.slice();
+  return a.flatMap((left) =>
+    b
+      .filter((right) => right.type === left.type)
+      .map((right) => {
+        const key_prefixes =
+          left.key_prefixes === undefined
+            ? right.key_prefixes
+            : right.key_prefixes === undefined
+              ? left.key_prefixes
+              : left.key_prefixes.flatMap((x) =>
+                  (right.key_prefixes ?? []).flatMap((y) =>
+                    x === y || x.startsWith(`${y}/`)
+                      ? [x]
+                      : y.startsWith(`${x}/`)
+                        ? [y]
+                        : [],
+                  ),
+                );
+        return {
+          type: left.type,
+          ...(key_prefixes === undefined
+            ? {}
+            : { key_prefixes: [...new Set(key_prefixes)] }),
+        };
+      }),
+  );
 }

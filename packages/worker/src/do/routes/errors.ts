@@ -9,7 +9,7 @@ import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
 import { formatZodIssues, jsonError } from "./responses";
-import { CORRELATION_ID_KEY } from "./types";
+import { CORRELATION_ID_KEY, WITHHOLD_RECORD_DETAIL_KEY } from "./types";
 
 export function installProjectErrorHandlers(app: Hono): void {
   app.onError((err, c) => {
@@ -34,11 +34,18 @@ export function installProjectErrorHandlers(app: Hono): void {
     if (err instanceof Error) {
       const mapped = mapProjectError(err);
       if (mapped) {
+        // A stale fence names the fence currently held. A record write from a
+        // credential that may not read the record is told only that it is stale.
+        const withholds = (c.get as (k: string) => boolean | undefined)(
+          WITHHOLD_RECORD_DETAIL_KEY,
+        );
         return jsonError(
           c,
           mapped.status as ContentfulStatusCode,
           mapped.code,
-          err.message,
+          withholds && err instanceof FenceError
+            ? "Fence mismatch"
+            : err.message,
           mapped.extras,
           mapped.retryable,
         );
