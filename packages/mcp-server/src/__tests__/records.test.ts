@@ -42,6 +42,43 @@ describe("registerRecordTools", () => {
     ]);
   });
 
+  it("describes the read and write side each tool needs", () => {
+    registerRecordTools(asServer(server), asFacade(facade), "proj-1");
+    const descriptionOf = (name: string) => {
+      const call = server.tool.mock.calls.find(
+        (entry: unknown[]) => entry[0] === name,
+      );
+      return String(call?.[1]);
+    };
+
+    // Reads need the read side of the key.
+    expect(descriptionOf("tila_record_get")).toMatch(/read access to the key/);
+    expect(descriptionOf("tila_record_history")).toMatch(
+      /read access to the key/,
+    );
+    expect(descriptionOf("tila_record_list")).toMatch(
+      /only the records .* may read/,
+    );
+    // Writes that return the stored record need it too.
+    for (const name of [
+      "tila_record_patch",
+      "tila_record_archive",
+      "tila_record_unarchive",
+    ])
+      expect(descriptionOf(name)).toMatch(
+        /read access to the key.*write-only credential is refused/,
+      );
+    // Set and put answer a write-only credential with a receipt.
+    for (const name of ["tila_record_set", "tila_record_put"])
+      expect(descriptionOf(name)).toMatch(
+        /receipt.*receipt: true.*type, key and fence/,
+      );
+    // A fence for set can come from that receipt.
+    expect(descriptionOf("tila_record_set")).toMatch(
+      /receipt of an earlier write/,
+    );
+  });
+
   it("tila_record_get calls records.get with type and key", async () => {
     registerRecordTools(asServer(server), asFacade(facade), "proj-1");
     facade.records.get.mockResolvedValue({
