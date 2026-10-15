@@ -10,7 +10,7 @@ import {
 } from "../src/index";
 
 /**
- * Canonical shared versions present in the embedded set: 1–44.
+ * Canonical shared versions present in the embedded set: 1–45.
  * The transactional receipts, archive watermark and transfer lock
  * are shared so cloud/local backups have identical recovery semantics.
  * The embedded-only idempotency overlay is appended
@@ -19,7 +19,7 @@ import {
 const CANONICAL_VERSIONS = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
   23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
-  42, 43, 44,
+  42, 43, 44, 45,
 ];
 const EXPECTED_VERSIONS = [
   ...CANONICAL_VERSIONS,
