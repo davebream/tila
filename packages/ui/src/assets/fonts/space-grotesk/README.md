@@ -28,9 +28,11 @@ Vietnamese letters) fall back to the system font in the `--font-logo` stack.
     `06d705cebbab916f0c0fe82b6c6f4cae06aa07fd6f5ee078421206040326ef63`
 - License: SIL Open Font License 1.1, copyright 2020 The Space Grotesk Project
   Authors. The license declares no Reserved Font Name, so the subsets keep the
-  upstream family name. The unmodified license text from the same release
-  (SHA-256 `564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72`)
-  is `../../../public/fonts/space-grotesk/OFL.txt`; Vite copies it to
+  upstream family name. The license from the same release (upstream SHA-256
+  `564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72`)
+  is `../../../public/fonts/space-grotesk/OFL.txt`, with line endings and one
+  trailing space normalized (bundled SHA-256
+  `18a4de52385f6b988782639d5d0cc1326e5a8c2de9a7f01d7b20d9aedcc60943`); Vite copies it to
   `dist/fonts/space-grotesk/OFL.txt` so it ships with the UI assets. The
   copyright and license strings are also kept in each font file's `name`
   table.
