@@ -26,7 +26,8 @@ queueConformance("embedded SDK queue conformance", async () => {
   return {
     queue: resources.queue,
     attempts: resources.attempts,
-    createTask: (id) => resources.tasks.create(id, "issue", { phase: "todo" }),
+    createTask: (id, data) =>
+      resources.tasks.create(id, "issue", { phase: "todo", ...data }),
     close: async () => {
       local.close();
       await rm(root, { recursive: true, force: true });

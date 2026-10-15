@@ -80,6 +80,18 @@ describe("embedded migration set on a fresh local DB (Step 4)", () => {
     expect(cols).toContain("source_version");
   });
 
+  it("(a2) record_revisions has the nullable principal_id column (migration 43)", () => {
+    const column = (
+      db.$client.query("PRAGMA table_info(record_revisions)").all() as {
+        name: string;
+        notnull: number;
+      }[]
+    ).find((c) => c.name === "principal_id");
+    expect(column).toBeDefined();
+    expect(column?.notnull).toBe(0);
+    expect(appliedVersions(db.$client)).toContain(43);
+  });
+
   it("(b) _migrations contains every embedded version including backup state", () => {
     const tracked = appliedVersions(db.$client);
     const expected = EMBEDDED_MIGRATIONS.map((m) => m.version).sort(
