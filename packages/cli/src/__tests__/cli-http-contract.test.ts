@@ -19,8 +19,14 @@ import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 const home = mkdtempSync(join(tmpdir(), "tila-http-contract-"));
 const entry = resolve(import.meta.dirname, "../index.ts");
 let respond: (req: IncomingMessage, res: ServerResponse) => void;
+let expectedToken = "fixture-token";
+const authorizationMatches: boolean[] = [];
 const requests: { url: string; participant: string | undefined }[] = [];
 const server = createServer((req, res) => {
+  // Retain only the comparison result; never put bearer headers in diagnostics.
+  authorizationMatches.push(
+    req.headers.authorization === `Bearer ${expectedToken}`,
+  );
   requests.push({
     url: req.url ?? "",
     participant: req.headers["x-tila-participant-id"] as string | undefined,
@@ -44,18 +50,28 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   requests.length = 0;
+  authorizationMatches.length = 0;
+  expectedToken = "fixture-token";
+  rmSync(join(home, ".tila/.env"), { force: true });
 });
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   rmSync(home, { recursive: true, force: true });
 });
-async function invoke(args: string[]) {
+async function invoke(
+  args: string[],
+  options: {
+    token?: string | null;
+    tilaHome?: string;
+    env?: { TILA_TOKEN?: string; TILA_API_TOKEN?: string };
+  } = {},
+) {
+  const token = options.token === undefined ? "fixture-token" : options.token;
   const child = spawn(
     "bun",
     [
       entry,
-      "--token",
-      "fixture-token",
+      ...(token === null ? [] : ["--token", token]),
       "--participant-id",
       "explicit-session",
       ...args,
@@ -65,14 +81,17 @@ async function invoke(args: string[]) {
       env: {
         PATH: process.env.PATH,
         HOME: home,
-        TILA_HOME: home,
+        TILA_HOME: options.tilaHome ?? home,
         XDG_CONFIG_HOME: join(home, "config"),
         XDG_CACHE_HOME: join(home, "cache"),
         CI: "1",
         CODEX_THREAD_ID: "",
         TILA_LIFECYCLE_KEY: "",
+        TILA_RUN_SOCKET: "",
+        TILA_RUN_CAPABILITY: "",
         TILA_TOKEN: "",
         TILA_API_TOKEN: "",
+        ...options.env,
         NO_COLOR: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -92,6 +111,157 @@ async function invoke(args: string[]) {
     stderr: Buffer.concat(stderr).toString(),
   };
 }
+
+const syntheticTokens = [
+  "synthetic-primary-sentinel",
+  "synthetic-alias-sentinel",
+  "synthetic-file-sentinel",
+  "synthetic-flag-sentinel",
+];
+function expectNoCredentialOutput(result: Awaited<ReturnType<typeof invoke>>) {
+  const output = result.stdout.toString() + result.stderr;
+  for (const token of syntheticTokens) {
+    expect(output).not.toContain(token);
+    expect(output).not.toContain(`Bearer ${token}`);
+  }
+}
+it.each([true, false])(
+  "authenticates real task startup using only TILA_TOKEN (json=%s)",
+  async (jsonOutput) => {
+    expectedToken = syntheticTokens[0];
+    respond = (_req, res) =>
+      json(res, {
+        ok: true,
+        entities: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+        next_cursor: null,
+        scope: { restricted: false, archived: "included" },
+      });
+    const result = await invoke(
+      ["task", "list", ...(jsonOutput ? ["--json"] : [])],
+      {
+        token: null,
+        env: { TILA_TOKEN: ` \t${expectedToken}\n` },
+      },
+    );
+    expect(result.status).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toContain("/projects/test/tasks?");
+    expect(authorizationMatches).toEqual([true]);
+    if (jsonOutput)
+      expect(JSON.parse(result.stdout.toString())).toMatchObject({
+        ok: true,
+        result: { items: [] },
+      });
+    expectNoCredentialOutput(result);
+  },
+);
+it("keeps --token ahead of conflicting environment and legacy file credentials", async () => {
+  expectedToken = syntheticTokens[3];
+  writeFileSync(
+    join(home, ".tila/.env"),
+    `TILA_API_TOKEN=${syntheticTokens[2]}\n`,
+  );
+  respond = (_req, res) =>
+    json(res, {
+      ok: true,
+      entities: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+      next_cursor: null,
+      scope: { restricted: false, archived: "included" },
+    });
+  const result = await invoke(["task", "list", "--json"], {
+    token: expectedToken,
+    env: { TILA_TOKEN: syntheticTokens[0], TILA_API_TOKEN: syntheticTokens[1] },
+  });
+  expect(result.status).toBe(0);
+  expect(authorizationMatches).toEqual([true]);
+  expectNoCredentialOutput(result);
+});
+it("does not retry a rejected primary using the alias or file", async () => {
+  expectedToken = syntheticTokens[0];
+  writeFileSync(
+    join(home, ".tila/.env"),
+    `TILA_API_TOKEN=${syntheticTokens[2]}\n`,
+  );
+  respond = (_req, res) =>
+    json(
+      res,
+      {
+        ok: false,
+        error: {
+          code: "unauthorized",
+          message: "fixture credential rejected",
+          retryable: false,
+        },
+      },
+      401,
+    );
+  const result = await invoke(["task", "list", "--json"], {
+    token: null,
+    env: { TILA_TOKEN: expectedToken, TILA_API_TOKEN: syntheticTokens[1] },
+  });
+  expect(result.status).toBe(1);
+  expect(authorizationMatches).toEqual([true]);
+  expect(JSON.parse(result.stderr).error.message).toBe(
+    "fixture credential rejected",
+  );
+  expectNoCredentialOutput(result);
+});
+it.each([true, false])(
+  "doctor --skip-auth resolves TILA_TOKEN without a keychain (json=%s)",
+  async (jsonOutput) => {
+    expectedToken = syntheticTokens[0];
+    // Remote diagnostic failures are independent of the project startup check.
+    respond = (_req, res) =>
+      json(
+        res,
+        {
+          ok: false,
+          error: {
+            code: "unauthorized",
+            message: "fixture diagnostic unavailable",
+            retryable: false,
+          },
+        },
+        401,
+      );
+    const result = await invoke(
+      ["doctor", "--skip-auth", ...(jsonOutput ? ["--json"] : [])],
+      {
+        token: null,
+        tilaHome: join(home, "absent-auth-store"),
+        env: { TILA_TOKEN: expectedToken },
+      },
+    );
+    expect(result.status).toBe(2);
+    expect(requests.some((req) => req.url === "/api/health")).toBe(true);
+    expect(authorizationMatches.length).toBeGreaterThan(0);
+    expect(authorizationMatches.every(Boolean)).toBe(true);
+    const output = result.stdout.toString() + result.stderr;
+    expect(output).not.toContain("No API token found");
+    expect(output).not.toContain("Startup checks failed");
+    expect(output).not.toContain("auth-store/store-backend");
+    if (jsonOutput) {
+      const data = JSON.parse(result.stdout.toString()).result;
+      expect(data.checks).toContainEqual({
+        name: "api-token",
+        status: "pass",
+        detail: "API token present",
+      });
+      expect(
+        data.checks.some((check: { name: string }) => check.name === "startup"),
+      ).toBe(false);
+    } else expect(output).toContain("API token present");
+    expectNoCredentialOutput(result);
+  },
+);
 it("preserves the successful remote task claim contract", async () => {
   respond = (_req, res) =>
     json(res, {
