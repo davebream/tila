@@ -2929,6 +2929,48 @@ destructive confirmation, fed by an archive preview.
 | Project display name and identity metadata; `settings_revision` | D1 registry; `GET/PATCH /projects/:id/project-settings`; SDK `project`, CLI `project settings/rename` | O (`project:configure`) for rename; root for destructive project operations / I | Settings → General (delivered). Rename is revision-checked and audited, and display only. IDs, creation time/actor and account binding are read-only provenance; archive/destroy remain explicit operational actions. |
 | Agent profile selection: `profile_id`, optional `host_ref` (enrollment) and `account_ref` | DO, on the agent (`profile_selection`, covered by the agent revision); `PATCH /agents/:id`; CLI `agent update --profile/--profile-host/--profile-account/--clear-profile`; MCP `tila_agent_update` | M for the selection; runtime attach still B / H | Settings → Agents, configured policy (delivered). A new attach must report the selected profile, account and enrollment, or it fails with `profile-mismatch`; an attached run's renewal is unaffected. A selection does not rewrite binding evidence, verify an account or grant credentials. Changing a host's local profile has no supported command (#283) and is shown as unavailable, never as success. |
 
+#### Record read and write restrictions (#530)
+
+Namespace restrictions gain a split form for records. `records` stays one rule
+list that applies to both sides. `records_read` and `records_write` are
+independent lists with the same rule shape; the two forms are mutually
+exclusive, an absent side denies every record once either field is present, and
+an empty list denies every record on its side. `hasNamespaceRestrictions`, the
+catalog, the search `restricted` flag and the DO `restricted` scope flag all see
+every field, so a policy that sets only one side is still a restricted
+credential.
+
+Enforcement uses the side of the operation, enumerated per route rather than
+inferred from the verb. `GET` and `HEAD` read, the listed create, replace, put,
+patch, archive, unarchive and claim routes write, and any other method or route
+is denied.
+
+| Operation | Side | Worker (`capabilityMiddleware`) | DO (`assertCredentialRequest`) |
+|---|---|---|---|
+| `GET/HEAD /records/:type/:key`, `~/history/:key` | read | key against `records_read` | same |
+| `GET /records/:type`, `GET /records/_types`, record search | read | passed through | rows, counts, types and catalog filtered by the read side |
+| `POST /records/:type`, `PUT /records/:type/:key`, `POST ~/put/:key` | write | key against `records_write` | same; response is a receipt when the read side does not admit the key |
+| `PATCH /records/:type/:key`, `POST ~/archive/:key`, `POST ~/unarchive/:key` | write and read | both sides for the same key | same (these return the stored record) |
+| `stamp-artifacts` (follow-up of a snapshot write) | write | not routed | write side |
+| claim acquire, renew, release on `record:<type>/<key>` | write | key against `records_write` | same |
+| claim state, claim listing on `record:<type>/<key>` | read | state checked, listing passed through | state checked; listing filtered by the read side |
+
+Containment (`policyContains`) and narrowing (`intersectCredentialPolicies`)
+work per side. Narrowing emits the legacy single list when both sides end up
+equal, so a policy that never used the split fields narrows to exactly what it
+always did. List cursors carry only a position; the current credential's read
+side is applied to every page, so a cursor cannot widen what another policy
+may see.
+
+The write response for `create`, `set` and `put` is a full record for any
+credential whose policy is not split (unchanged). For a split policy it is the
+full record only when the credential holds `records:read` and its read side
+admits the key; otherwise it is the receipt `{ ok, receipt: true, type, key,
+fence }`. The receipt is explicit in the API schema (`RecordWriteResponse`), the
+SDK (`isRecordWriteReceipt`) and the MCP result schemas, so clients narrow on it
+rather than finding fields missing. The stale-fence message and the
+undeclared-type message are likewise limited for such a caller.
+
 #### Client, host and deployment boundary — explained exclusions
 
 | Field group / authority | Current surface | Boundary and management path |

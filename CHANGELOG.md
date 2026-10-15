@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Credentials that use `restrictions.records_read` or `restrictions.records_write` cannot be parsed by a Worker from before this change (policy objects are strict). That Worker rejects such a policy and the credential has no access; it does not fall back to broader access. Deploy the Worker before issuing these credentials, and reissue them as `records` policies if you roll back (#530).
+- `tila-sdk` `records.create`, `records.set` and `records.put` now return `RecordWriteResponse`, the record response or a write receipt. Code that reads `response.record` on these calls narrows first with `isRecordWriteReceipt`. A receipt is only returned to a credential that may write but not read the key, so nothing changes for credentials that can read what they write (#530).
+
+### Added
+
+- Record restrictions can limit reading and writing separately: `restrictions.records_read` and `restrictions.records_write` take the same rules as `records`, which keeps meaning both sides and cannot be combined with the new fields. Once either field is set the side that is not listed denies every record, and an empty list denies every record on its side. A credential can, for example, read `answer/a1/...` and write only `question/q1/...`; it is refused a write to an answer and a read of a question, and learns nothing of the other side through list, catalog, search, history or claim state and listing. Delegation, session narrowing, run ceilings, workload bindings and imported policies narrow each side independently. Existing policies behave as before (#530).
+- A credential that may write a record but not read it receives a write receipt (`ok`, `receipt`, `type`, `key`, `fence`) from create, set and put instead of the stored record. Patch, archive and unarchive return the stored record and therefore need read access to the same key. A stale-fence error and an undeclared-type error from such a credential no longer name the current fence or the project's other record types (#530).
+
 ### Fixed
 
 - Data commands (`task`, `record`, `artifact` and the others that act on the project in the current directory) no longer ignore an explicit `--instance`. They run only when that instance is registered, trusted and is the Worker of the current directory's project (and `--project`, when given, names that project); otherwise they stop with `invalid-argument` before any credential is read or request is sent. Without `--instance` nothing changes. `tila project destroy` and `tila disconnect` apply the same check before reading credentials or deleting anything; `tila project destroy <slug>` accepts `--instance` only when it is the Worker saved in `~/.tila/infra.toml`. To act on another instance's project, run from that project's directory (#522).
