@@ -119,6 +119,7 @@ export type MockFacadeShape = {
     | "set"
     | "put"
     | "get"
+    | "meta"
     | "patch"
     | "archive"
     | "unarchive"
@@ -293,6 +294,7 @@ export function createMockFacade(): MockFacadeShape {
       "set",
       "put",
       "get",
+      "meta",
       "patch",
       "archive",
       "unarchive",
