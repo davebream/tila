@@ -4,6 +4,7 @@ import { type ProjectBackupSource, exportProjectBackup } from "tila-sdk/backup";
 import { requireTokenAsync } from "../../auth";
 import { findConfig } from "../../config";
 import { assertExplicitInstanceTarget } from "../../lib/explicit-instance";
+import { resolveParticipantId } from "../../lib/global-flags";
 import { printJson } from "../../lib/output";
 import * as p from "../../lib/prompts";
 
@@ -50,6 +51,7 @@ export default defineCommand({
         projectId: config.project_id,
         baseUrl: config.worker_url,
         token: await requireTokenAsync(),
+        participantId: resolveParticipantId().id,
         cloudflareAccountId: config.cloudflare?.account_id,
       };
     }

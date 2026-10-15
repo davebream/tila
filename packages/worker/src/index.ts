@@ -138,33 +138,6 @@ app.route("/auth/session", authSessionExchange);
 
 app.route("/", runtimeRoutes);
 
-// Session-protected auth routes (logout, status)
-const authSessionRoutes = new Hono<AppEnv>();
-authSessionRoutes.use("/*", createAuthMiddleware());
-authSessionRoutes.route("/auth/session", authSessionProtected);
-authSessionRoutes.route("/auth", authSessionProtected);
-app.route("/", authSessionRoutes);
-
-// Token management routes -- auth-protected but no project middleware needed
-// (projectId comes from the bearer token, not from the URL)
-const tokenRoutes = new Hono<AppEnv>();
-tokenRoutes.use("/*", createAuthMiddleware());
-tokenRoutes.use("/*", csrfGuard);
-tokenRoutes.use("/*", auxiliaryCapabilityMiddleware);
-tokenRoutes.route("/api/tokens", tokens);
-tokenRoutes.route("/api/repos", repos);
-tokenRoutes.route("/api", whoami);
-
-app.route("/", tokenRoutes);
-
-// Workspace routes -- auth-protected, no project middleware (workspace-session scoped)
-const workspaceRoutes = new Hono<AppEnv>();
-workspaceRoutes.use("/*", createAuthMiddleware());
-workspaceRoutes.use("/*", csrfGuard);
-workspaceRoutes.use("/*", auxiliaryCapabilityMiddleware);
-workspaceRoutes.route("/", workspace);
-app.route("/api/workspace", workspaceRoutes);
-
 // Sweep route — secret-header auth (no bearer token). Uses the shared
 // constant-time compare with the "tila-sweep-compare" HMAC key, which MUST stay
 // distinct from the infra "tila-secret-compare" key (see lib/constant-time-compare.ts).
@@ -194,12 +167,47 @@ sweepRoutes.post("/sweep", async (c) => {
   const summary = await runSweep(c.env);
   return c.json({ ok: true, ...summary });
 });
+
+// /_internal routes authenticate with Worker secrets (SWEEP_SECRET,
+// INFRA_ADMIN_TOKEN), never a project token. Mount them BEFORE every sub-app
+// that registers `use("/*", createAuthMiddleware())`: Hono re-adds a mounted
+// sub-app's middleware at the mount path, so it applies to every route
+// registered after it and would otherwise answer 401 (and record a failed-auth
+// rate-limit entry) before the secret is ever compared.
 app.route("/_internal", sweepRoutes);
 
-// Infra-owner admin routes (e.g. destroy any project by slug). Authenticated by
-// the INFRA_ADMIN_TOKEN secret, NOT a per-project token — mounted outside
-// /projects/:projectId so it bypasses projectMiddleware's PROJECT_MISMATCH guard.
+// Infra-owner admin routes (e.g. destroy any project by slug, backup transfer).
+// Authenticated by the INFRA_ADMIN_TOKEN secret, NOT a per-project token —
+// mounted outside /projects/:projectId so it bypasses projectMiddleware's
+// PROJECT_MISMATCH guard.
 app.route("/_internal", infra);
+
+// Session-protected auth routes (logout, status)
+const authSessionRoutes = new Hono<AppEnv>();
+authSessionRoutes.use("/*", createAuthMiddleware());
+authSessionRoutes.route("/auth/session", authSessionProtected);
+authSessionRoutes.route("/auth", authSessionProtected);
+app.route("/", authSessionRoutes);
+
+// Token management routes -- auth-protected but no project middleware needed
+// (projectId comes from the bearer token, not from the URL)
+const tokenRoutes = new Hono<AppEnv>();
+tokenRoutes.use("/*", createAuthMiddleware());
+tokenRoutes.use("/*", csrfGuard);
+tokenRoutes.use("/*", auxiliaryCapabilityMiddleware);
+tokenRoutes.route("/api/tokens", tokens);
+tokenRoutes.route("/api/repos", repos);
+tokenRoutes.route("/api", whoami);
+
+app.route("/", tokenRoutes);
+
+// Workspace routes -- auth-protected, no project middleware (workspace-session scoped)
+const workspaceRoutes = new Hono<AppEnv>();
+workspaceRoutes.use("/*", createAuthMiddleware());
+workspaceRoutes.use("/*", csrfGuard);
+workspaceRoutes.use("/*", auxiliaryCapabilityMiddleware);
+workspaceRoutes.route("/", workspace);
+app.route("/api/workspace", workspaceRoutes);
 
 const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("/*", createAuthMiddleware());
