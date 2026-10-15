@@ -3210,6 +3210,12 @@ many rows share a timestamp. With a `limit`, the response carries an opaque
 - Migration 35 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
   indexes. `title` and `status` sorts read `data.title` and `data.status`
   directly (not presentation metadata) and are not indexed.
+- **Page size.** Without `limit`, every matching task comes back in one response
+  (`limit: null`, `next_cursor: null`); send a `limit` to page. A `limit` above
+  500 is served as 500 and the response echoes the effective value. The per-page
+  tag, blocker and artifact lookups run in slices of 90 ids, so neither an
+  omitted `limit` nor one above 100 meets Durable Object SQLite's 100-value
+  statement cap (#519).
 
 **Unified search pages with per-kind offsets.** `GET /search` ranks each kind by
 FTS5 bm25 with an id tie-break. bm25 scores shift whenever the corpus changes,
