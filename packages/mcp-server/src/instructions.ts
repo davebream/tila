@@ -15,6 +15,8 @@ Renew finite leases explicitly. After loss or a stale fence, inspect and reconci
 Records use their own revision fence from a read; create never overwrites an existing record.
 Reading events or signals never acknowledges them. Acknowledge only processed events/deliveries.
 For replay, keep through_seq fixed and advance after_seq to next_after_seq until has_more is false.
+Filtered replay (event_name, correlation_id) looks up reports: pages may be empty while has_more is true,
+and its next_after_seq is not an acknowledgment position.
 Reuse a handoff UUID with identical content when retrying. Closing does not terminate your runtime.
 
 Artifact responses include producer provenance and review state. A matching hash establishes byte

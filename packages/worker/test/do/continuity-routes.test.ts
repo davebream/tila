@@ -57,6 +57,46 @@ describe("DO continuity routes", () => {
       pending_signals: [],
     });
   });
+  it("snapshots a whole scan budget for filtered replay and one page otherwise", async () => {
+    const insert = fixture.sqlite.prepare(
+      "INSERT INTO journal (t, kind, resource, actor, data) VALUES (?, ?, ?, 'actor', ?)",
+    );
+    insert.run(1, "task.created", "task:a", "{}");
+    insert.run(
+      2,
+      "custom.reported",
+      "project",
+      JSON.stringify({ event_name: "pipeline.done", correlation_id: "run-1" }),
+    );
+    insert.run(3, "task.created", "task:b", "{}");
+    const unfiltered = await (
+      await app.request("/journal/replay?after_seq=0&limit=2")
+    ).json();
+    expect(unfiltered).toMatchObject({ page_through_seq: 2, through_seq: 3 });
+    expect(unfiltered).not.toHaveProperty("filter");
+
+    const filtered = await (
+      await app.request(
+        "/journal/replay?after_seq=0&limit=2&event_name=pipeline.done&correlation_id=run-1",
+      )
+    ).json();
+    expect(filtered).toMatchObject({
+      page_through_seq: 3,
+      filter: {
+        event_name: "pipeline.done",
+        correlation_id: "run-1",
+        limit: 2,
+      },
+    });
+    expect(filtered.events).toHaveLength(3);
+
+    for (const query of ["event_name=Not%20A%20Name", "correlation_id="]) {
+      const response = await app.request(
+        `/journal/replay?after_seq=0&${query}`,
+      );
+      expect(response.status).toBe(400);
+    }
+  });
   it("reports immutable conflicts, future cursors, and missing handoffs", async () => {
     const input = {
       id: crypto.randomUUID(),

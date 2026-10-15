@@ -13,6 +13,7 @@ import {
   type HandoffListResponse,
   HandoffSchema,
   type IdentityContext,
+  JOURNAL_REPLAY_SCAN_BUDGET,
   JournalAcknowledgeRequestSchema,
   type JournalCursor,
   type JournalReplayRequest,
@@ -79,7 +80,14 @@ export function acknowledge(
   });
 }
 
-/** Fully materialize the live page inside the transaction, before archive I/O. */
+/**
+ * Fully materialize the live page inside the transaction, before archive I/O.
+ *
+ * A filtered request (`event_name` and/or `correlation_id`) materializes up to
+ * `JOURNAL_REPLAY_SCAN_BUDGET` sequences instead of one `limit`-sized page, so
+ * one archive read serves the whole scan. The snapshot carries the filter and
+ * `completeReplay` applies it only after verifying the range is complete.
+ */
 export function replaySnapshot(
   db: Db,
   input: JournalReplayRequest,
@@ -92,8 +100,11 @@ export function replaySnapshot(
       "invalid-cursor",
       "Replay bounds must satisfy after_seq <= through_seq <= current sequence",
     );
+  const filtered =
+    query.event_name !== undefined || query.correlation_id !== undefined;
+  const span = filtered ? JOURNAL_REPLAY_SCAN_BUDGET : query.limit;
   const pageThrough =
-    query.after_seq + Math.min(query.limit, through - query.after_seq);
+    query.after_seq + Math.min(span, through - query.after_seq);
   const rows = db
     .select()
     .from(schema.journal)
@@ -122,6 +133,13 @@ export function replaySnapshot(
       fence: row.fence,
       data: JSON.parse(row.data),
     })),
+    ...(filtered && {
+      filter: {
+        event_name: query.event_name,
+        correlation_id: query.correlation_id,
+        limit: query.limit,
+      },
+    }),
   };
 }
 

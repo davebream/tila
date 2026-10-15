@@ -11,12 +11,23 @@ export interface JournalArchiveReader {
   /** Yield raw JSON rows; implementations must paginate object listings. */
   read(afterSeq: number, throughSeq: number): AsyncIterable<unknown>;
 }
+/** Exact-match selectors for project reports; absent fields do not constrain. */
+export interface ReplayFilter {
+  event_name?: string;
+  correlation_id?: string;
+}
 export interface ReplaySnapshot {
   after_seq: number;
   through_seq: number;
   page_through_seq: number;
   archived_through_seq: number;
   events: ReplayEvent[];
+  /**
+   * Present only for a filtered request. `(after_seq, page_through_seq]` is
+   * then the examined scan range rather than one page, and `limit` caps the
+   * matches returned from it.
+   */
+  filter?: ReplayFilter & { limit: number };
 }
 export type ReentrySnapshot = Omit<ReentryResponse, "ok" | "changes"> & {
   replay: ReplaySnapshot;
@@ -103,10 +114,35 @@ export async function* journalJsonLines(
   }
 }
 
-export async function completeReplay(
+/**
+ * A report matches when every selector given equals its field exactly. Only
+ * `custom.reported` rows can match: another kind, or a row without the selected
+ * field, never does, whatever else its data holds.
+ */
+export function matchesReplayFilter(
+  event: ReplayEvent,
+  filter: ReplayFilter,
+): boolean {
+  if (event.kind !== "custom.reported") return false;
+  const data = event.data as Record<string, unknown> | null;
+  if (data === null || typeof data !== "object") return false;
+  return (
+    (filter.event_name === undefined ||
+      data.event_name === filter.event_name) &&
+    (filter.correlation_id === undefined ||
+      data.correlation_id === filter.correlation_id)
+  );
+}
+
+/**
+ * Merge live and archived rows for the snapshot's range and prove every
+ * sequence is present exactly once. Callers filter only after this succeeds, so
+ * lost history is a 503, never an empty page.
+ */
+async function resolveReplayEvents(
   snapshot: ReplaySnapshot,
   archives?: JournalArchiveReader,
-): Promise<JournalReplayResponse> {
+): Promise<ReplayEvent[]> {
   const events = new Map<number, ReplayEvent>();
   const add = (event: ReplayEvent) => {
     if (
@@ -164,11 +200,37 @@ export async function completeReplay(
         503,
       );
   }
+  return [...events.values()].sort((a, b) => a.seq - b.seq);
+}
+
+export async function completeReplay(
+  snapshot: ReplaySnapshot,
+  archives?: JournalArchiveReader,
+): Promise<JournalReplayResponse> {
+  const events = await resolveReplayEvents(snapshot, archives);
+  const { filter } = snapshot;
+  if (!filter) {
+    return {
+      ok: true,
+      events,
+      next_after_seq: snapshot.page_through_seq,
+      through_seq: snapshot.through_seq,
+      has_more: snapshot.page_through_seq < snapshot.through_seq,
+    };
+  }
+  const matches = events.filter((event) => matchesReplayFilter(event, filter));
+  // Progress is what was actually examined, so a client resumes without
+  // skipping or repeating: the whole range, unless matches overflowed the limit.
+  const returned = matches.slice(0, filter.limit);
+  const nextAfterSeq =
+    matches.length > filter.limit
+      ? returned[returned.length - 1].seq
+      : snapshot.page_through_seq;
   return {
     ok: true,
-    events: [...events.values()].sort((a, b) => a.seq - b.seq),
-    next_after_seq: snapshot.page_through_seq,
+    events: returned,
+    next_after_seq: nextAfterSeq,
     through_seq: snapshot.through_seq,
-    has_more: snapshot.page_through_seq < snapshot.through_seq,
+    has_more: nextAfterSeq < snapshot.through_seq,
   };
 }
