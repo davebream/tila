@@ -15,6 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { InstanceKey } from "@tila/schemas";
+import { exportProjectBackup } from "tila-sdk/backup";
+import { createTilaLocal } from "tila-sdk/local";
 import {
   afterAll,
   beforeAll,
@@ -383,6 +385,92 @@ describe("project destroy with an explicit --instance", () => {
     expect(output).not.toContain("different deployment");
     expect(a.requests).toEqual([]);
     expect(b.requests).toEqual([]);
+  });
+});
+
+describe("project import with an explicit --instance and no project config", () => {
+  const importedProject = "import-local-proj";
+  const noConfigDir = join(root, "no-config");
+  const archive = join(root, "fixture.tila-backup");
+  const localState = () => join(home, "projects", importedProject, "state.db");
+
+  beforeAll(async () => {
+    mkdirSync(noConfigDir, { recursive: true });
+    const source = {
+      backend: "local" as const,
+      projectId: importedProject,
+      dbPath: join(root, "import-source.db"),
+      artifactsPath: join(root, "import-source-artifacts"),
+    };
+    const local = await createTilaLocal({
+      dbPath: source.dbPath,
+      artifactsPath: source.artifactsPath,
+      project: source.projectId,
+      org: "local",
+      skipFilesystemCheck: true,
+    });
+    await local.project.create({
+      id: "seed",
+      type: "task",
+      data: { title: "seed", status: "open" },
+      created_by: "test",
+    });
+    local.close();
+    await exportProjectBackup({ source, output: archive });
+  });
+
+  it("--local --instance B creates no local destination", async () => {
+    const result = await invoke(
+      [
+        "--instance",
+        "b-key",
+        "project",
+        "import",
+        archive,
+        "--local",
+        "--json",
+      ],
+      { cwd: noConfigDir },
+    );
+    expectRefusedBeforeAnyRequest(result, /cannot be combined with --local/);
+    expect(existsSync(localState())).toBe(false);
+  });
+
+  it("refuses before the archive is read", async () => {
+    const garbage = join(root, "garbage.tila-backup");
+    writeFileSync(garbage, "not an archive");
+    const result = await invoke(
+      [
+        "--instance",
+        "b-key",
+        "project",
+        "import",
+        garbage,
+        "--local",
+        "--json",
+      ],
+      { cwd: noConfigDir },
+    );
+    expectRefusedBeforeAnyRequest(result, /cannot be combined with --local/);
+  });
+
+  it("without --local an explicit --instance still stops with no destination", async () => {
+    const result = await invoke(
+      ["--instance", "b-key", "project", "import", archive, "--json"],
+      { cwd: noConfigDir },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("No destination project found");
+    expect(existsSync(localState())).toBe(false);
+  });
+
+  it("without --instance, --local still creates the local destination (control)", async () => {
+    const result = await invoke(
+      ["project", "import", archive, "--local", "--json"],
+      { cwd: noConfigDir },
+    );
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(existsSync(localState())).toBe(true);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   ExplicitInstanceTargetError,
   assertExplicitInstanceIsInfraWorker,
   assertExplicitInstanceTarget,
+  assertNoExplicitInstanceForLocal,
 } from "../../lib/explicit-instance";
 
 const A_URL = "https://a.example.com";
@@ -247,5 +248,27 @@ describe("assertExplicitInstanceIsInfraWorker", () => {
       ),
     );
     expect(error.message).toContain('--project "proj-b"');
+  });
+});
+
+describe("assertNoExplicitInstanceForLocal", () => {
+  it("is a no-op without --instance", () => {
+    expect(() => assertNoExplicitInstanceForLocal({})).not.toThrow();
+  });
+
+  it("refuses any explicit --instance, including an empty one", () => {
+    for (const instance of ["b-key", ""]) {
+      let error: unknown;
+      try {
+        assertNoExplicitInstanceForLocal({ instance });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(ExplicitInstanceTargetError);
+      expect((error as ExplicitInstanceTargetError).code).toBe(
+        "invalid-argument",
+      );
+      expect((error as Error).message).toContain("--local");
+    }
   });
 });
