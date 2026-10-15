@@ -5,7 +5,11 @@ import { RevisionConflictError } from "./config-revision-ops";
 import { SchemaWriteError } from "./constraint-ops";
 import { ConversationError } from "./conversation-ops";
 import { DoIdempotencyConflictError } from "./do-idempotency-ops";
-import { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
+import {
+  EntityAlreadyExistsError,
+  EntityNotFoundError,
+  TaskDataTooLargeError,
+} from "./entity-ops";
 import {
   ClaimOwnershipError,
   ExpiredClaimError,
@@ -56,6 +60,7 @@ type ProjectErrorConstructor =
   | typeof RevisionNotFoundError
   | typeof EntityAlreadyExistsError
   | typeof EntityNotFoundError
+  | typeof TaskDataTooLargeError
   | typeof DoIdempotencyConflictError
   | typeof SchemaCorruptError
   | typeof InvalidCursorError;
@@ -154,6 +159,14 @@ export const projectErrorResponses: ProjectErrorResponse[] = [
     errorClass: EntityNotFoundError,
     status: 404,
     code: "not-found",
+    retryable: false,
+  },
+  // Task data over MAX_TASK_DATA_BYTES: refused before the write, and sending
+  // the same payload again cannot succeed.
+  {
+    errorClass: TaskDataTooLargeError,
+    status: 413,
+    code: "payload-too-large",
     retryable: false,
   },
   // Same Idempotency-Key reused with a different body — mirrors the worker

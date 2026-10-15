@@ -10,7 +10,14 @@ import type {
   Entity,
   RecordSearchResult,
 } from "@tila/schemas";
-import { TagsSchema, permitsTask, presentedTitle } from "@tila/schemas";
+import {
+  MAX_TASK_DATA_BYTES,
+  TagsSchema,
+  permitsTask,
+  presentedTitle,
+  taskDataBytes,
+  taskDataTooLargeMessage,
+} from "@tila/schemas";
 import type { LifecycleOutcome, TilaSchemaToml } from "@tila/schemas";
 import {
   type SQL,
@@ -69,6 +76,20 @@ export class EntityAlreadyExistsError extends Error {
   constructor(public readonly entityId: string) {
     super(`Entity already exists: ${entityId}`);
     this.name = "EntityAlreadyExistsError";
+  }
+}
+
+/**
+ * Task data past `MAX_TASK_DATA_BYTES`. `bytes` is the size the write would
+ * have stored; `currentBytes` is the stored size when the write was an update.
+ */
+export class TaskDataTooLargeError extends Error {
+  constructor(
+    public readonly bytes: number,
+    public readonly currentBytes?: number,
+  ) {
+    super(taskDataTooLargeMessage(bytes, currentBytes));
+    this.name = "TaskDataTooLargeError";
   }
 }
 
@@ -209,6 +230,8 @@ export function insertEntityInTransaction(
   schemaVersion: number,
   now: number,
 ): Entity {
+  const bytes = taskDataBytes(input.data);
+  if (bytes > MAX_TASK_DATA_BYTES) throw new TaskDataTooLargeError(bytes);
   const current = assertCurrentEntityWrite(tx, input.type, input.data);
   assertArtifactReviewPolicy(tx, input.id, input.type, input.data.status);
   try {
@@ -695,6 +718,40 @@ export function update(
   );
 }
 
+/**
+ * The attempt machinery's own write: the lifecycle field set to the state its
+ * definition names for starting or for an outcome, and nothing else. Only this
+ * shape is exempt from the task data bound, because refusing it would strand
+ * an attempt on a task whose data it has no way to trim.
+ *
+ * The exemption is decided by the patch, not by the attempt id alone: the id is
+ * only checked against a live attempt for managed tasks, so a caller that
+ * supplied one with arbitrary data would otherwise carry that data past the
+ * bound. Here the only value that can pass is a state name the project's own
+ * definition declares, which bounds how far a transition can overshoot.
+ */
+function isAttemptTransition(
+  lifecycle:
+    | {
+        field: string;
+        on_start?: string;
+        outcomes?: Partial<Record<LifecycleOutcome, string>>;
+      }
+    | undefined,
+  data: Record<string, unknown>,
+  internalAttemptId: string | undefined,
+): boolean {
+  if (internalAttemptId === undefined || !lifecycle) return false;
+  const keys = Object.keys(data);
+  if (keys.length !== 1 || keys[0] !== lifecycle.field) return false;
+  const state = data[lifecycle.field];
+  return (
+    typeof state === "string" &&
+    (state === lifecycle.on_start ||
+      Object.values(lifecycle.outcomes ?? {}).includes(state))
+  );
+}
+
 /** Internal primitive for a task transition committed together with an attempt result. */
 export function updateInTransaction(
   tx: Parameters<
@@ -763,6 +820,16 @@ export function updateInTransaction(
   // Merge data: spread existing + new fields (passthrough preservation)
   const existingData = JSON.parse(existing.data) as Record<string, unknown>;
   const mergedData = { ...existingData, ...data };
+  // The bound applies to the merged result, not to the patch. A task already
+  // over it may only shrink, which lets a client trim it but never grow it.
+  if (!isAttemptTransition(lifecycle, data, internalAttemptId)) {
+    const mergedBytes = taskDataBytes(mergedData);
+    if (mergedBytes > MAX_TASK_DATA_BYTES) {
+      const currentBytes = taskDataBytes(existingData);
+      if (mergedBytes >= currentBytes)
+        throw new TaskDataTooLargeError(mergedBytes, currentBytes);
+    }
+  }
   const current = assertCurrentEntityWrite(tx, existing.type, mergedData);
   if (mergedData.status !== existingData.status)
     assertArtifactReviewPolicy(tx, id, existing.type, mergedData.status);
