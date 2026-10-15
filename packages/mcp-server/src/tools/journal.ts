@@ -39,7 +39,7 @@ export function registerJournalTools(
   registerPrimitiveTool(
     server,
     "tila_journal_list",
-    "Query the project event journal. Returns journal entries in chronological order. Use to inspect execution history for coordination decisions.",
+    "Query the project event journal. Without after_seq, returns the newest entries, newest first. With after_seq, returns the next entries after that sequence, oldest first: advance after_seq to the last seq returned until a page comes back shorter than limit. Use to inspect execution history for coordination decisions.",
     {
       resource: z.string().optional().describe("Filter by entity ID"),
       event_name: z.string().optional().describe("Filter by custom event name"),
@@ -61,7 +61,9 @@ export function registerJournalTools(
         .number()
         .int()
         .optional()
-        .describe("Return events after this sequence number"),
+        .describe(
+          "Cursor: return the next events after this sequence number, oldest first",
+        ),
       limit: z
         .number()
         .int()
