@@ -201,13 +201,14 @@ describe("compact queue listing", () => {
   it("costs the same whatever the task content weighs, so the saving scales with it", () => {
     // Compact removes task data, not the entry, attempt or block reasons. Each
     // compact entry is about 0.6 KB, so thin tasks (about 1-2 KB of content)
-    // fall short of 5x; only the full listing grows with the body.
+    // fall short of 5x; only the full listing grows with the body. The separate
+    // test above covers the 100-task fixture, so this comparison needs fewer.
     const sizes = [1_000, 2_000, 5_000];
     const measured = sizes.map((bodyBytes) => {
       fixture.rawDb.close();
       fixture = createTestDb();
       applySchema(fixture.db, compactDefinition, "test");
-      seed(100, (index) => managedWork(index, bodyBytes));
+      seed(40, (index) => managedWork(index, bodyBytes));
       return {
         full: jsonBytes(inspect({ limit: 100 })),
         compact: jsonBytes(inspect({ limit: 100, compact: true })),
