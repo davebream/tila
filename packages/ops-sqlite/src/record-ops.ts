@@ -156,7 +156,7 @@ export function searchRecords(
 ): RecordSearchResult[] {
   if (!query._skipValidation) validateFtsQuery(query.q);
   const limit = Math.min(query.limit ?? 20, 101);
-  const restricted = recordRestrictionCondition(query.restrictions);
+  const restricted = recordRestrictionCondition(query.restrictions, "read");
 
   const tagConditions = query.tagFilter?.length
     ? tagExistsConditions(
@@ -1469,7 +1469,7 @@ export function listRecords(
   }
 
   const conditions: SQL[] = [eq(schema.records.type, filter.type)];
-  const restricted = recordRestrictionCondition(filter.restrictions);
+  const restricted = recordRestrictionCondition(filter.restrictions, "read");
   if (restricted) conditions.push(restricted);
 
   if (!filter.includeArchived) {
@@ -1523,6 +1523,10 @@ export function listRecords(
       : sort === "revision"
         ? schema.records.revision
         : null;
+  // The caller's read side is not part of the binding. `conditions` applies it
+  // to every page, so a cursor only names a key to continue from and can never
+  // widen what the caller sees; under a different read side the next page may
+  // start elsewhere, and the rows it holds are still the caller's own.
   const binding = fingerprint({
     type: filter.type,
     includeArchived: filter.includeArchived ?? false,
@@ -1739,7 +1743,7 @@ export function listRecordTypesInUse(
     .where(
       and(
         eq(schema.records.archived, 0),
-        recordRestrictionCondition(restrictions),
+        recordRestrictionCondition(restrictions, "read"),
       ),
     )
     .all();
@@ -1761,7 +1765,7 @@ export function countRecordTypes(
       archived_count: sql<number>`coalesce(sum(case when ${schema.records.archived} = 0 then 0 else 1 end), 0)`,
     })
     .from(schema.records)
-    .where(recordRestrictionCondition(restrictions))
+    .where(recordRestrictionCondition(restrictions, "read"))
     .groupBy(schema.records.type)
     .orderBy(asc(schema.records.type))
     .all()

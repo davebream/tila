@@ -1231,6 +1231,25 @@ When source bytes exactly match canonical JSON, both share one content-addressed
 key; an existing `record-snapshot-canonical` pointer is also accepted for that
 same record resource.
 
+### Write Receipt
+
+`create`, `set` and `put` normally return the record with `fence` and
+`revision`. A credential whose policy splits record reads from record writes
+(`restrictions.records_read` / `records_write`) and that may write but not read
+the key returns a receipt instead, because a replace would otherwise echo state
+the caller never sent:
+
+```json
+{ "ok": true, "receipt": true, "type": "question", "key": "q1/x", "fence": 4 }
+```
+
+A receipt carries no value, tags, archived flag, timestamps, author or revision;
+the fence is what a later fenced write needs. `receipt` is absent from every full
+response, so clients can tell the two apart (`isRecordWriteReceipt` in the SDK,
+`RecordWriteResponseSchema` in `@tila/schemas`). Patch, archive and unarchive
+return the stored record, so they need read access to the same key and never
+return a receipt. Responses for every other credential are unchanged.
+
 ### Patch Request
 
 ```http

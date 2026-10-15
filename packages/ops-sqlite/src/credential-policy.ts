@@ -2,9 +2,14 @@ import {
   type CredentialPolicy,
   CredentialPolicySchema,
   type NamespaceRestrictions,
+  type RecordAccessSide,
+  canEchoStoredRecord,
   hasNamespaceRestrictions,
-  permitsRecord,
+  isReadMethod,
+  permitsRecordSide,
   permitsTask,
+  recordResourceTarget,
+  recordRulesForSide,
 } from "@tila/schemas";
 import { type SQL, and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -27,11 +32,17 @@ export function readCredentialPolicy(
     ? undefined
     : CredentialPolicySchema.parse(JSON.parse(header));
 }
+/**
+ * The SQL form of the record rules for one side. Every caller states its side
+ * because a split policy admits different records for reading and writing.
+ */
 export function recordRestrictionCondition(
-  restrictions?: NamespaceRestrictions,
+  restrictions: NamespaceRestrictions | undefined,
+  side: RecordAccessSide,
 ): SQL | undefined {
-  if (restrictions?.records === undefined) return undefined;
-  const rules = restrictions.records.map((rule) =>
+  const records = recordRulesForSide(restrictions, side);
+  if (records === undefined) return undefined;
+  const rules = records.map((rule) =>
     and(
       eq(schema.records.type, rule.type),
       rule.key_prefixes === undefined
@@ -106,22 +117,23 @@ export function taskIdAccessCondition(
       .where(inArray(schema.entities.type, types)),
   );
 }
+/**
+ * `side` is the side of the namespace the request exercises: reading a claim's
+ * state or listing claims is a read, acquiring, renewing or releasing is a
+ * write. Task resources have no sides and ignore it.
+ */
 export function assertResourceAccess(
   db: DB,
   policy: CredentialPolicy,
   resource: unknown,
+  side: RecordAccessSide,
 ) {
   if (typeof resource !== "string") throw new CredentialPolicyDenied();
   if (resource.startsWith("record:")) {
-    const rest = resource.slice(7);
-    const slash = rest.indexOf("/");
+    const target = recordResourceTarget(resource);
     if (
-      slash < 1 ||
-      !permitsRecord(
-        policy.restrictions,
-        rest.slice(0, slash),
-        rest.slice(slash + 1),
-      )
+      target === undefined ||
+      !permitsRecordSide(policy.restrictions, side, target.type, target.key)
     )
       throw new CredentialPolicyDenied();
     return;
@@ -134,6 +146,80 @@ export function assertResourceAccess(
   );
   if (colon >= 0 && entity.type !== resource.slice(0, colon))
     throw new CredentialPolicyDenied();
+}
+
+/** Record writes whose response is the stored row, not just the caller's input. */
+const ECHOING_OPERATIONS: ReadonlySet<string> = new Set([
+  "patch",
+  "archive",
+  "unarchive",
+]);
+
+export interface RecordRequestTarget {
+  type: string;
+  /** A string once the request addresses a record; anything else is denied. */
+  key: unknown;
+  /** The side of the namespace the request exercises. */
+  side: RecordAccessSide;
+  /** The response carries the stored row, so the read side is needed too. */
+  echoesStored: boolean;
+}
+
+/**
+ * The record a single-record `/record/...` request addresses, or `undefined`
+ * for the routes that filter rows themselves (list and types-in-use). Only
+ * GET and HEAD read; every other route is a write, so a route added later is checked
+ * against the write side instead of slipping through as a read.
+ */
+export function recordRequestTarget(
+  method: string,
+  path: string,
+  body: Record<string, unknown>,
+): RecordRequestTarget | undefined {
+  if (!path.startsWith("/record/") || path === "/record/types-in-use")
+    return undefined;
+  const segments = path.split("/").slice(2).map(decodeURIComponent);
+  const type = segments.shift() ?? "";
+  if (segments.length === 1 && segments[0] === "list") return undefined;
+  if (isReadMethod(method)) {
+    // Value reads and `/history` are the only record GETs.
+    if (segments.at(-1) === "history") segments.pop();
+    return {
+      type,
+      key: segments.join("/"),
+      side: "read",
+      echoesStored: false,
+    };
+  }
+  if (segments.length === 1 && segments[0] === "create")
+    return { type, key: body.key, side: "write", echoesStored: false };
+  const operation = segments.pop();
+  return {
+    type,
+    key: segments.join("/"),
+    side: "write",
+    echoesStored: operation !== undefined && ECHOING_OPERATIONS.has(operation),
+  };
+}
+
+/**
+ * True when this record write comes from a split policy that may not read the
+ * key: its response and its errors must then carry nothing the caller did not
+ * send or already hold.
+ */
+export function withholdsStoredRecordDetail(
+  policy: CredentialPolicy,
+  method: string,
+  path: string,
+  body: Record<string, unknown>,
+): boolean {
+  const target = recordRequestTarget(method, path, body);
+  return (
+    target !== undefined &&
+    target.side === "write" &&
+    typeof target.key === "string" &&
+    !canEchoStoredRecord(policy, target.type, target.key)
+  );
 }
 
 /** Runs before DO side effects and before any DO idempotency replay. */
@@ -171,20 +257,24 @@ export function assertCredentialRequest(
   if (!restricted) return;
   if (path === "/schema/current" || path === "/admin/transfer/status") return; // Internal validation/status only, never returned by restricted public routes.
   if (path.startsWith("/record/")) {
-    if (path === "/record/types-in-use") return;
-    const segments = path.split("/").slice(2).map(decodeURIComponent);
-    const type = segments.shift() ?? "";
-    if (segments.length === 1 && segments[0] === "list") return;
-    let key: unknown;
-    if (method === "POST" && segments.length === 1 && segments[0] === "create")
-      key = body.key;
-    else {
-      if (method !== "GET" || segments.at(-1) === "history") segments.pop();
-      key = segments.join("/");
-    }
+    // Listing, counting and type enumeration filter rows by the read side.
+    const target = recordRequestTarget(method, path, body);
+    if (target === undefined) return;
     if (
-      typeof key !== "string" ||
-      !permitsRecord(policy.restrictions, type, key)
+      typeof target.key !== "string" ||
+      !permitsRecordSide(
+        policy.restrictions,
+        target.side,
+        target.type,
+        target.key,
+      )
+    )
+      throw new CredentialPolicyDenied();
+    // The response of these operations is the full stored record, which the
+    // caller did not send, so they need the read side as well.
+    if (
+      target.echoesStored &&
+      !canEchoStoredRecord(policy, target.type, target.key)
     )
       throw new CredentialPolicyDenied();
     if (body.source_artifact_key) throw new CredentialPolicyDenied();
@@ -224,10 +314,13 @@ export function assertCredentialRequest(
     return;
   } else if (path.startsWith("/coord/")) {
     if (path === "/coord/claims") return; // Filter the resource list before return.
+    // Claim state is a read of the resource; acquire, renew and release are
+    // writes to it.
     assertResourceAccess(
       db,
       policy,
-      method === "GET" ? query.get("resource") : body.resource,
+      isReadMethod(method) ? query.get("resource") : body.resource,
+      isReadMethod(method) ? "read" : "write",
     );
     return;
   } else throw new CredentialPolicyDenied();

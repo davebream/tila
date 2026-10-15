@@ -2,6 +2,7 @@ import {
   CredentialPolicyDenied,
   assertCredentialRequest,
   readCredentialPolicy,
+  withholdsStoredRecordDetail,
 } from "@tila/ops-sqlite";
 import { projectTransferOps } from "@tila/ops-sqlite";
 import { Hono } from "hono";
@@ -26,7 +27,7 @@ import { createSchemaRoutes } from "./routes/schema-routes";
 import { createSignalRoutes } from "./routes/signal-routes";
 import { createSweepRoutes } from "./routes/sweep-routes";
 import { createTransferRoutes } from "./routes/transfer-routes";
-import { CORRELATION_ID_KEY } from "./routes/types";
+import { CORRELATION_ID_KEY, WITHHOLD_RECORD_DETAIL_KEY } from "./routes/types";
 import type { RouterDeps } from "./routes/types";
 
 export type { RouterDeps } from "./routes/types";
@@ -47,17 +48,29 @@ export function createProjectRouter(deps: RouterDeps) {
                 .clone()
                 .json()
                 .catch(() => ({}));
-        if (policy)
+        if (policy) {
+          const bodyRecord =
+            body && typeof body === "object" && !Array.isArray(body)
+              ? (body as Record<string, unknown>)
+              : {};
           assertCredentialRequest(
             deps.db,
             policy,
             c.req.method,
             c.req.path,
             new URL(c.req.url).searchParams,
-            body && typeof body === "object" && !Array.isArray(body)
-              ? (body as Record<string, unknown>)
-              : {},
+            bodyRecord,
           );
+          if (
+            withholdsStoredRecordDetail(
+              policy,
+              c.req.method,
+              c.req.path,
+              bodyRecord,
+            )
+          )
+            c.set(WITHHOLD_RECORD_DETAIL_KEY as never, true as never);
+        }
       } catch (error) {
         if (error instanceof CredentialPolicyDenied)
           return c.json(

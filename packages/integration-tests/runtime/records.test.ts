@@ -557,3 +557,110 @@ it("reports each revision's principal and credential through the real Worker, st
   expect(third.principal_id).not.toBe(service.principal_id);
   expect(third.principal_id).toBe(`token:${third.token_id}`);
 });
+
+it("keeps a write-only record credential to a receipt and refuses reads before any snapshot write", async () => {
+  const { projectId, request: admin } = await fixture();
+  const store = new CredentialStore(bindings.DB);
+  const actor = { principalId: "fixture" };
+  const service = await store.createService(
+    projectId,
+    {
+      name: "write-only-worker",
+      display_name: "Write-only worker",
+      role: "participant",
+    },
+    actor,
+  );
+  const token = await generateToken();
+  await store.issue(
+    {
+      projectId,
+      principalId: service.principal_id,
+      name: "write-only-key",
+      tokenHash: await hashToken(token, bindings.HASH_PEPPER),
+      policy: {
+        role: "participant",
+        capabilities: ["records:read", "records:write"],
+        restrictions: {
+          records_write: [{ type: "config", key_prefixes: ["team/a"] }],
+        },
+      },
+    },
+    actor,
+  );
+  const request = (path: string, body?: unknown, method = "GET") =>
+    SELF.fetch(`https://worker/projects/${projectId}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Tila-Participant-Id": "write-only",
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  // A reader of the whole project seeds a record with tags the writer never sends.
+  const seeded = await mutation(
+    await admin("/records/config", {
+      key: "team/a/head",
+      value: { region: "seeded" },
+      tags: ["stored-tag"],
+    }),
+    201,
+  );
+  expect(seeded.revision).toBe(1);
+
+  const put = await request(
+    "/records/config/~/put/team/a/head",
+    { value: { region: "replaced" } },
+    "POST",
+  );
+  expect(put.status).toBe(200);
+  const receipt = await put.json<Record<string, unknown>>();
+  expect(receipt).toEqual({
+    ok: true,
+    receipt: true,
+    type: "config",
+    key: "team/a/head",
+    fence: expect.any(Number),
+  });
+  expect(JSON.stringify(receipt)).not.toContain("stored-tag");
+
+  const created = await request(
+    "/records/config",
+    { key: "team/a/new", value: { region: "new" } },
+    "POST",
+  );
+  expect(created.status).toBe(201);
+  expect(Object.keys(await created.json<object>()).sort()).toEqual(
+    ["fence", "key", "ok", "receipt", "type"].sort(),
+  );
+
+  const before = (await bindings.ARTIFACTS.list()).objects.map((o) => o.key);
+  for (const [path, body, method] of [
+    ["/records/config/team/a/head", undefined, "GET"],
+    ["/records/config/~/history/team/a/head", undefined, "GET"],
+    [
+      "/records/config/team/a/head",
+      { patch: { region: "x" }, fence: 1 },
+      "PATCH",
+    ],
+    ["/records/config/~/archive/team/a/head", { fence: 1 }, "POST"],
+    ["/records/config/team/b/head", { value: { region: "x" } }, "PUT"],
+  ] as const) {
+    const denied = await request(path, body, method);
+    expect(denied.status, `${method} ${path}`).toBe(403);
+    await denied.text();
+  }
+  const list = await request("/records/config");
+  expect(await list.json()).toMatchObject({ items: [], meta: { total: 0 } });
+  expect((await bindings.ARTIFACTS.list()).objects.map((o) => o.key)).toEqual(
+    before,
+  );
+
+  // The write took effect and kept what it did not replace.
+  const stored = await admin("/records/config/team/a/head");
+  expect(await stored.json()).toMatchObject({
+    record: { value: { region: "replaced" }, tags: ["stored-tag"] },
+  });
+});

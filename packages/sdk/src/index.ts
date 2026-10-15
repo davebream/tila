@@ -37,6 +37,7 @@ export {
   CredentialPolicySchema,
   CapabilitySchema,
   NamespaceRestrictionsSchema,
+  isRecordWriteReceipt,
   type CredentialPolicy,
   type Capability,
   type NamespaceRestrictions,
@@ -150,6 +151,8 @@ export type {
   // Record types
   RecordGetResponse,
   RecordMutateResponse,
+  RecordWriteResponse,
+  RecordWriteReceiptResponse,
   RecordListResponse,
   RecordListItem,
   RecordHistoryResponse,
