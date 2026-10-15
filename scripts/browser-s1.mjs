@@ -393,7 +393,7 @@ try {
   await writeFile(
     seed,
     `INSERT INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id) VALUES ('${project}', 'Browser S1', strftime('%s','now'), 'browser-fixture', 'local');
-INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES ('${createHash("sha256").update(token).digest("hex")}', '${project}', 'browser-competitor', 'full', strftime('%s','now'), 'browser-fixture');`,
+INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by, token_id) VALUES ('${createHash("sha256").update(token).digest("hex")}', '${project}', 'browser-competitor', 'full', strftime('%s','now'), 'browser-fixture', '00000000-0000-4000-8000-000000000308');`,
     { mode: 0o600 },
   );
   await command("seed", [
@@ -471,17 +471,29 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(10_000),
     });
-    const data = await response.json();
-    assert.equal(
-      response.ok,
-      true,
-      `fixture API ${path}: HTTP ${response.status}`,
+    const contentType = (response.headers.get("Content-Type") || "<missing>")
+      .split(";")[0]
+      .trim()
+      .toLowerCase()
+      .slice(0, 100);
+    const diagnostic = `fixture API ${path}: HTTP ${response.status}, Content-Type ${contentType}`;
+    assert.equal(response.ok, true, diagnostic);
+    assert.match(
+      contentType,
+      /^application\/(?:[\w.-]+\+)?json$/,
+      `${diagnostic}; expected JSON`,
     );
-    assert.equal(data.ok, true, "fixture API success envelope");
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(`${diagnostic}; invalid JSON`);
+    }
+    assert.equal(data.ok, true, `${diagnostic}; expected success envelope`);
     return data;
   }
   const schemaPath = `/projects/${project}/schema`;
-  const health = await request("/health");
+  const health = await request("/api/health");
   const runtimeInfo = await request("/api/runtime/info");
   record("local product and protocol identities", {
     product: health.version,
