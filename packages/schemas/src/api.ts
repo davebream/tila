@@ -248,8 +248,23 @@ export const TASK_LIST_SORTS = [
   "type",
   "title",
   "status",
+  "state",
   "id",
 ] as const;
+
+/**
+ * One task state in a `state` filter. States are compared exactly (case and
+ * spacing included), so only a blank state, which no task can hold, is refused.
+ */
+export const TaskStateSchema = z
+  .string()
+  .refine((state) => state.trim().length > 0, "task state must not be blank");
+
+/** The `state` list filter: at least one state. */
+export const TaskStateListSchema = z.array(TaskStateSchema).min(1);
+
+export const TASK_STATE_FILTER_MESSAGE =
+  "state must be a comma list of non-blank task states";
 
 /** Numeric paging contract shared by HTTP and embedded task lists. */
 export const TaskListPageOptionsSchema = z
@@ -309,6 +324,20 @@ export const TaskListQuerySchema = z
               (outcome) => LifecycleOutcomeSchema.safeParse(outcome).success,
             ),
         { message: `outcome must list ${LIFECYCLE_OUTCOMES.join(", ")}` },
+      )
+      .optional(),
+    /**
+     * Comma list: tasks whose state is one of these. A task's state is the
+     * value of its type's lifecycle field, or `status` when the type declares
+     * no lifecycle; it is what the Tasks list shows in its State column.
+     */
+    state: z
+      .string()
+      .refine(
+        (value) => TaskStateListSchema.safeParse(value.split(",")).success,
+        {
+          message: TASK_STATE_FILTER_MESSAGE,
+        },
       )
       .optional(),
   })

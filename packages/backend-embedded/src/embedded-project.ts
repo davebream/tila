@@ -102,6 +102,7 @@ import {
   type RecordListItem,
   type RecordRow,
   TaskListPageOptionsSchema,
+  TaskStateListSchema,
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -255,12 +256,14 @@ export class EmbeddedProject
   async list(filter?: EntityListFilter): Promise<Entity[]> {
     if (filter?.outcome !== undefined)
       LifecycleOutcomeSchema.array().min(1).parse(filter.outcome);
+    if (filter?.state !== undefined) TaskStateListSchema.parse(filter.state);
     return entityOps.list(this.db, filter).entities;
   }
 
   async listPage(filter?: EntityListFilter): Promise<EntityListPage> {
     if (filter?.outcome !== undefined)
       LifecycleOutcomeSchema.array().min(1).parse(filter.outcome);
+    if (filter?.state !== undefined) TaskStateListSchema.parse(filter.state);
     const paging = TaskListPageOptionsSchema.parse(filter ?? {});
     const { entities, total, next_cursor, outcome_types } = entityOps.list(
       this.db,

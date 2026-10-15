@@ -223,12 +223,14 @@ entities.get("/", async (c) => {
     order: c.req.query("order"),
     blocked: c.req.query("blocked"),
     outcome: c.req.query("outcome"),
+    state: c.req.query("state"),
   });
   if (!paging.success) return zodValidationError(c, paging.error);
   const query: Record<string, string> = {};
   if (paging.data.cursor) query.cursor = paging.data.cursor;
   if (paging.data.blocked) query.blocked = paging.data.blocked;
   if (paging.data.outcome) query.outcome = paging.data.outcome;
+  if (paging.data.state) query.state = paging.data.state;
   const type = c.req.query("type");
   if (type) query.type = type;
   const archived = c.req.query("archived");

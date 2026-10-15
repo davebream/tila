@@ -26,6 +26,7 @@ import {
   desc,
   eq,
   getTableColumns,
+  getTableName,
   inArray,
   or,
   sql,
@@ -321,10 +322,55 @@ export type TaskListSort =
   | "type"
   | "title"
   | "status"
+  | "state"
   | "id";
 
-/** SQL expression each sort key orders by. `id` is always the tie-break. */
-function sortExpression(sort: TaskListSort): SQL | null {
+/**
+ * Lifecycle field of every declared type that has a lifecycle. Any other type
+ * (no lifecycle, not declared, or no schema applied) is read by `status`.
+ * Keys are sorted so the map binds and fingerprints the same way every time.
+ */
+function lifecycleFields(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+): Record<string, string> {
+  const units = resolveCurrentSchema(db)?.work_units ?? {};
+  const fields: Record<string, string> = {};
+  for (const type of Object.keys(units).sort()) {
+    const lifecycle = units[type]?.lifecycle;
+    if (lifecycle) fields[type] = lifecycle.field;
+  }
+  return fields;
+}
+
+/**
+ * An outer-row column, always table-qualified. Inside the state subquery a bare
+ * `type` would read `json_each`'s own `type` column, and Drizzle drops the
+ * qualifier from a column used in a single-table select list.
+ */
+function outerColumn(column: "type" | "data"): SQL {
+  return sql`${sql.identifier(getTableName(schema.entities))}.${sql.identifier(column)}`;
+}
+
+/**
+ * A task's state: the string held by its type's lifecycle field, else by
+ * `status` when the type declares no lifecycle. A missing, blank or non-string
+ * value is NULL. This is the value the Tasks list shows in its State column,
+ * so filtering and sorting on it always agree with what is displayed.
+ *
+ * The field is matched by exact key, as readiness does: a JSON path would read
+ * a field named `a.b` as a nested lookup. The type-to-field map is one bound
+ * JSON object, so the statement's bound-value count does not grow with the
+ * number of types (Durable Object SQLite caps a statement at 100).
+ */
+function taskStateExpression(fields: Record<string, string>): SQL {
+  return sql`(SELECT CASE WHEN state_field.type = 'text' AND trim(state_field.value, char(32, 9, 10, 11, 12, 13)) <> '' THEN state_field.value END FROM json_each(${outerColumn("data")}) AS state_field WHERE state_field.key = coalesce((SELECT declared.value FROM json_each(${JSON.stringify(fields)}) AS declared WHERE declared.key = ${outerColumn("type")}), 'status'))`;
+}
+
+/**
+ * SQL expression each sort key orders by. `id` is always the tie-break.
+ * `state` is the expression `list` resolved from the current schema.
+ */
+function sortExpression(sort: TaskListSort, state: SQL | null): SQL | null {
   switch (sort) {
     case "created_at":
       return sql`${schema.entities.created_at}`;
@@ -336,6 +382,9 @@ function sortExpression(sort: TaskListSort): SQL | null {
       return sql`json_extract(${schema.entities.data}, '$.title')`;
     case "status":
       return sql`json_extract(${schema.entities.data}, '$.status')`;
+    case "state":
+      // `list` resolves the expression whenever it sorts by state.
+      return state ?? sql`NULL`;
     case "id":
       return null;
     default:
@@ -389,6 +438,11 @@ export function list(
     blocked?: boolean;
     /** Only tasks in the state their type's lifecycle names for an outcome. */
     outcome?: LifecycleOutcome[];
+    /**
+     * Only tasks in one of these states: the value of each type's lifecycle
+     * field, or `status` for a type that declares no lifecycle.
+     */
+    state?: string[];
   },
   enrichOpts?: EnrichOpts,
 ): {
@@ -398,10 +452,26 @@ export function list(
   /** With `outcome`: visible types whose lifecycle declares one of them. */
   outcome_types?: string[];
 } {
+  const sort: TaskListSort = filter?.sort ?? "created_at";
+  const states = filter?.state?.length
+    ? [...new Set(filter.state)].sort()
+    : undefined;
+  // Resolved only when the list filters or sorts by state, so other lists
+  // never depend on the stored schema.
+  const stateFields =
+    sort === "state" || states ? lifecycleFields(db) : undefined;
+  const stateExpr = stateFields ? taskStateExpression(stateFields) : null;
+
   const conditions: SQL[] = [];
   const restricted = taskRestrictionCondition(db, filter?.restrictions);
   if (restricted) conditions.push(restricted);
 
+  if (states && stateExpr) {
+    // One bound JSON array keeps the statement size independent of the count.
+    conditions.push(
+      sql`${stateExpr} IN (SELECT value FROM json_each(${JSON.stringify(states)}))`,
+    );
+  }
   if (filter?.blocked) {
     // One bound JSON array keeps the statement size independent of the count.
     const ids = [...blockedTaskIds(readReadinessSnapshot(db))];
@@ -490,9 +560,8 @@ export function list(
     .get();
   const total = countResult?.count ?? 0;
 
-  const sort: TaskListSort = filter?.sort ?? "created_at";
   const dir = filter?.order === "desc" ? "desc" : "asc";
-  const expr = sortExpression(sort);
+  const expr = sortExpression(sort, stateExpr);
   const binding = fingerprint({
     type:
       filter?.type === undefined ? null : [filter.type].flat().slice().sort(),
@@ -505,6 +574,11 @@ export function list(
     ...(filter?.outcome?.length
       ? { outcome: filter.outcome.slice().sort() }
       : {}),
+    // The type-to-field map decides what a state is, so a schema change that
+    // moves a lifecycle field ends cursors issued under the old one instead of
+    // silently reordering rows between pages.
+    ...(states ? { state: states } : {}),
+    ...(stateFields ? { stateFields } : {}),
     sort,
     order: dir,
   });
