@@ -79,7 +79,11 @@ command runs only when `<key>` is a registered, trusted instance whose Worker UR
 is the project's `project_id`. Otherwise it stops with `invalid-argument` before credentials are read
 or any request is sent — including from a local project, which has no instance. Only the registry
 file is read. Without `--instance`, behavior is unchanged. Commands that read the project config
-directly (`admin` with a token override, `project export`, `project import`) apply the same check.
+directly (`admin` with a token override, `project export`, `project import`, and the local-plan form
+of `project destroy`) apply the same check before reading credentials, prompting or deleting
+anything. Infra-owner `project destroy <slug>` acts on the Worker saved in `~/.tila/infra.toml`;
+`--instance` is never a selector there, and an explicit key is accepted only when it is that
+Worker's registered, trusted instance.
 Runtime commands (`machine`, `run`) keep their own `--instance` selection semantics.
 
 The resolver returns a `TrustDecision` (`packages/cli/src/auth-store/resolver-types.ts`):
