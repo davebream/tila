@@ -752,11 +752,11 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
 | GET | `/search` | query: `q`, `kind`, `type`, `syntax`, `limit`, `cursor`, `tag_filter` | `{ results: [], total, next_cursor, scope }` — `total` counts this page (§14.8) |
 | GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
-| POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` |
+| POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` — `data` is limited to 256 KiB (§14.10) |
 | GET | `/entities/:id` | — | `{ entity, claim?, recent_journal }` |
-| PATCH | `/entities/:id` | `{ patch, idempotency_key }` | `{ entity }` |
+| PATCH | `/entities/:id` | `{ patch, idempotency_key }` | `{ entity }` — the merged `data` is limited to 256 KiB (§14.10) |
 | POST | `/entities/:id/archive` | `{ idempotency_key }` | `{ ok }` |
-| POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` |
+| POST | `/entities/:id/relationships` | `{ to, type, idempotency_key }` | `{ ok }` — both tasks must exist, else 404 `not-found` (§14.10) |
 | DELETE | `/entities/:id/relationships/:to/:type` | — | `{ ok }` |
 | POST | `/acquire` | `{ resource, mode, ttl_ms, metadata? }` + participant/environment headers | `{ ok: true, fence, expires_at, participant_id }` or 409 |
 | POST | `/renew` | `{ resource, fence, ttl_ms }` + participant/environment headers | `{ ok: true, expires_at }` or 409 |
@@ -774,10 +774,11 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
 | GET | `/journal` | query: `after_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `event_name`, `correlation_id`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — without `after_seq` the newest `limit` events, newest first; with `after_seq` the next `limit` events after it, oldest first, so a client pages forward by passing the last `seq` as `after_seq` until a page is shorter than `limit`. `archived: true` (cursor below `lastArchivedSeq`) returns no events: read archived history with `/journal/replay` |
-| GET | `/journal/stream` | query: `since_seq` | Historical SSE proposal; not implemented in v0.10.0. Use journal reads and durable cursors; no scheduled SSE milestone. |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
 | GET | `/` (and static paths) | — | UI HTML/JS bundle |
+
+There is no `/journal/stream` route, and the Worker serves no server-sent-event stream. Follow new events by paging `GET /journal` forward with `after_seq`, and read archived history with `GET /journal/replay`.
 
 ### 3a.3 Idempotency keys
 
@@ -1412,7 +1413,7 @@ These are structural checks — they verify "does this edge make sense in the de
 
 #### Work lifecycle and readiness
 
-An optional `[work_units.<type>.lifecycle]` declares the business states used for readiness. It does not enroll or launch work. The checked-in task definition uses `status`, dispatches only from `open`, and treats `done` as successful while `cancelled` remains terminal but does not satisfy dependencies.
+An optional `[work_units.<type>.lifecycle]` declares the business states used for readiness. It does not enroll or launch work. The checked-in task definition, like the one `tila project create` generates, uses `status`, dispatches only from `open`, and treats `done` as successful while `failed`, `cancelled` and `deferred` remain terminal but do not satisfy dependencies.
 
 | Field | Meaning |
 |---|---|
@@ -1423,6 +1424,10 @@ An optional `[work_units.<type>.lifecycle]` declares the business states used fo
 | `on_start`, `outcomes.success/failure/cancelled/abandoned` | Optional execution-to-business-state mappings; absent mappings leave business status unchanged |
 
 Declared states must match the field's allowed values when present. Start mappings cannot be terminal. Outcome mappings may target nonterminal states: an attempt can fail and return a ticket to `open` for a retry, or succeed and leave it awaiting review. Entity writes validate lifecycle field values against the current definition within the project transaction; custom terminal transitions enforce pending gates, including gates addressed by the canonical resource name.
+
+`tila task close <id> --outcome <outcome>` closes work through this declaration, in local and remote mode alike. It reads the task's type and the applied definition, looks up `lifecycle.outcomes.<outcome>`, and writes that state to `lifecycle.field`. It writes no other field: it never stores `status: closed` or an `outcome` value. Accepted outcomes are `success`, `failure`, `cancelled` and `abandoned`, plus the earlier words `completed` (`success`) and `deferred` (`abandoned`). Anything else is rejected before the backend is opened. The command also refuses, before any write, when no definition is applied or the stored one cannot be read, the task's type declares no lifecycle, the outcome has no mapping, or the mapped state is not listed in `lifecycle.terminal`; an attempt may still map an outcome to a nonterminal state, but closing a task may not.
+
+Existing projects are not migrated. The generated and bundled definitions declare all four outcomes on `status` (`done`, `failed`, `cancelled`, `deferred`), but a project created earlier keeps the definition it applied. To use `task close` there, add a `[work_units.<type>.lifecycle]` table and its `[work_units.<type>.lifecycle.outcomes]` mappings (see `tila.schema.toml`), include the mapped states in the lifecycle field's values, and run `tila schema apply`. Tasks closed by earlier CLI versions keep their stored `closed` status and `outcome` data.
 
 Readiness respects hard and soft dependency edges, unresolved gates, archive state, and transitive prerequisites. Cycles remain blocked with a diagnostic path. Archiving an unfinished predecessor never counts as success; an explicitly successful predecessor can subsequently be archived without losing its recorded success. Configured work depending on an unconfigured type is blocked until its predecessor's lifecycle is declared. The shared evaluator returns diagnostic reasons for missing work, missing lifecycle metadata, unsuccessful dependencies, cycles and gates.
 
@@ -1992,7 +1997,7 @@ tila task new "<title>" [--parent <id>] [--type <type>]
 tila task list [--status=...] [--parent=...] [--ready] [--leaf-only]
 tila task show <id>
 tila task update <id> --field=value
-tila task close <id> --outcome=success|failed|cancelled
+tila task close <id> --outcome=success|failure|cancelled|abandoned   # also: completed, deferred
 tila task archive <id>
 
 tila issue new ...               # same shape as task
@@ -3386,6 +3391,48 @@ The page states are derived in order:
 7. **Idle:** every check completed and found nothing.
 
 A forbidden check is listed as "not checked with your access", never as zero.
+
+### 14.10 Task write bounds (#519)
+
+Two task writes that used to reach SQLite and answer a retryable 500 are
+refused before the write, with a non-retryable error.
+
+**Task data is limited to 256 KiB.** The limit is `MAX_TASK_DATA_BYTES`
+(262,144) in `@tila/schemas`, measured as the UTF-8 byte length of the JSON the
+task's `data` is stored as, so key order does not change it and multibyte
+characters count by bytes. `data` exactly at the limit is accepted; one byte more
+is refused with `413 payload-too-large` and `retryable: false`, and nothing is
+written (no task, tags, search document or journal event).
+
+| Write | What is measured |
+|---|---|
+| Create (`POST /tasks`) | The `data` of the new task. The Worker refuses it before the Durable Object hop; the shared ops layer checks every create again, including each task a template creates. |
+| Update (`PATCH /tasks/:id`) | The merged `data` (stored data with the patch applied), not the patch. A patch under the limit can still be refused. |
+
+- **Oversized stored tasks can only shrink.** A task whose stored `data` is
+  already over the limit (written before the bound existed) may be updated only
+  when the result is strictly smaller than what is stored. That lets a client
+  trim it; an update that keeps the size or grows it, including a patch that
+  changes nothing, is refused with the same `413`. Once the task is within the
+  limit the ordinary rule applies.
+- **Attempts are not stranded.** An execution attempt's lifecycle transition
+  (the start state or an outcome state named by the definition) is not
+  refused for size, so work already in flight on such a task can still finish.
+  Only that one write is exempt; the same state set by a client update is not.
+- **Same rule everywhere.** The check lives in the shared ops layer, so
+  embedded and local backends refuse the same way. They raise
+  `TaskDataTooLargeError`, which maps to `payload-too-large`.
+- Records keep their own 64 KiB bound; task list behavior is unchanged.
+
+**A relationship needs two existing tasks.** `POST /tasks/relationships` checks
+`from_id`, then `to_id`, for every relationship type, and answers
+`404 not-found` naming the first missing id with `retryable: false`. Nothing is
+written. Valid requests (`201`, `created: true`) and duplicates (`200`,
+`created: false`) are unchanged, and a `parent-child` request is still refused
+with `422` when the parent's type is the hierarchy leaf (checked after both tasks
+are known to exist). Archived tasks remain valid endpoints. Embedded and local
+backends do not yet make this check; their callers see the database's foreign
+key error.
 
 ## Managed execution foundations
 

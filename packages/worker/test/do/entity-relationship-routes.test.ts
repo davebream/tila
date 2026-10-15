@@ -1,4 +1,5 @@
 import type { schema } from "@tila/ops-sqlite";
+import { EntityRelationshipTypeSchema } from "@tila/schemas";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,7 +51,7 @@ afterEach(() => {
 // Helper: seed an entity and relationships via the route layer
 // ---------------------------------------------------------------------------
 
-async function createRelationship(
+async function postRelationship(
   fromId: string,
   toId: string,
   type: string,
@@ -60,6 +61,19 @@ async function createRelationship(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from_id: fromId, to_id: toId, type, actor: "test" }),
   });
+}
+
+/** Creates the relationship between two tasks that exist, as a client must. */
+async function createRelationship(
+  fromId: string,
+  toId: string,
+  type: string,
+): Promise<Response> {
+  for (const id of [fromId, toId]) {
+    const res = await createEntity(id);
+    expect([200, 409]).toContain(res.status);
+  }
+  return postRelationship(fromId, toId, type);
 }
 
 async function createEntity(id: string, type = "task"): Promise<Response> {
@@ -299,5 +313,199 @@ describe("POST /entity/create — duplicate id handling", () => {
     };
     expect(body.ok).toBe(false);
     expect(body.error.code).toBe("already-exists");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /entity/relationship/create — both endpoints must exist, for every type
+// ---------------------------------------------------------------------------
+
+const LEAF_SCHEMA_TOML = `
+schema_version = 1
+
+[work_units.epic]
+parents = []
+[work_units.epic.fields]
+title = { type = "string", required = true }
+
+[work_units.task]
+parents = ["epic"]
+[work_units.task.fields]
+title = { type = "string", required = true }
+
+[hierarchy]
+levels = ["epic", "task"]
+`;
+
+type ErrorBody = {
+  ok: boolean;
+  error: { code: string; message: string; retryable: boolean };
+};
+
+function count(table: string, where = "1 = 1"): number {
+  const row = testDb.sqlite
+    .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`)
+    .get() as { n: number };
+  return row.n;
+}
+
+async function expectMissing(res: Response, id: string): Promise<void> {
+  expect(res.status).toBe(404);
+  const body = (await res.json()) as ErrorBody;
+  expect(body.ok).toBe(false);
+  expect(body.error.code).toBe("not-found");
+  expect(body.error.retryable).toBe(false);
+  expect(body.error.message).toContain(id);
+}
+
+describe("POST /entity/relationship/create — endpoint existence", () => {
+  beforeEach(() => {
+    // The Durable Object enforces foreign keys; do the same here so a missing
+    // endpoint that reached the insert would fail as it does in production.
+    testDb.sqlite.close();
+    testDb = createTestDb({ foreignKeys: "on" });
+    db = testDb.db;
+    app = createApp(db);
+  });
+
+  const TYPES = EntityRelationshipTypeSchema.options;
+
+  it.each(TYPES)(
+    "%s: a missing to_id is 404 and writes nothing",
+    async (type) => {
+      await createEntity("from-1");
+
+      await expectMissing(
+        await postRelationship("from-1", "ghost-to", type),
+        "ghost-to",
+      );
+
+      expect(count("entity_relationships")).toBe(0);
+      expect(count("journal", "kind = 'relationship.entity.created'")).toBe(0);
+    },
+  );
+
+  it.each(TYPES)(
+    "%s: a missing from_id is 404 and writes nothing",
+    async (type) => {
+      await createEntity("to-1");
+
+      await expectMissing(
+        await postRelationship("ghost-from", "to-1", type),
+        "ghost-from",
+      );
+
+      expect(count("entity_relationships")).toBe(0);
+      expect(count("journal", "kind = 'relationship.entity.created'")).toBe(0);
+    },
+  );
+
+  it.each(TYPES)(
+    "%s: from_id is reported first when both are missing",
+    async (type) => {
+      await expectMissing(
+        await postRelationship("ghost-from", "ghost-to", type),
+        "ghost-from",
+      );
+      expect(count("entity_relationships")).toBe(0);
+    },
+  );
+
+  it("never answers a missing endpoint with a retryable 500", async () => {
+    await createEntity("from-1");
+    const res = await postRelationship("from-1", "ghost-to", "blocks");
+    expect(res.status).not.toBe(500);
+    const body = (await res.json()) as ErrorBody;
+    expect(body.error.code).not.toBe("internal");
+    expect(body.error.retryable).toBe(false);
+  });
+
+  it.each(TYPES)(
+    "%s: still creates, then no-ops on a duplicate",
+    async (type) => {
+      const first = await createRelationship("from-1", "to-1", type);
+      expect(first.status).toBe(201);
+      expect(((await first.json()) as { created: boolean }).created).toBe(true);
+
+      const second = await postRelationship("from-1", "to-1", type);
+      expect(second.status).toBe(200);
+      expect(((await second.json()) as { created: boolean }).created).toBe(
+        false,
+      );
+      expect(count("entity_relationships")).toBe(1);
+      expect(count("journal", "kind = 'relationship.entity.created'")).toBe(1);
+    },
+  );
+
+  it("still accepts an archived endpoint", async () => {
+    await createEntity("from-1");
+    await createEntity("to-1");
+    testDb.sqlite.prepare("UPDATE entities SET archived = 1").run();
+
+    const res = await postRelationship("from-1", "to-1", "blocks");
+    expect(res.status).toBe(201);
+  });
+
+  it("still answers missing required fields with 400 validation-error", async () => {
+    const res = await app.request("/entity/relationship/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from_id: "from-1", type: "blocks", actor: "t" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as ErrorBody;
+    expect(body.error.code).toBe("validation-error");
+  });
+
+  describe("parent-child with a leaf-type parent", () => {
+    beforeEach(() => {
+      testDb.sqlite
+        .prepare(
+          "INSERT INTO _schema_history (version, definition, applied_at, applied_by) VALUES (1, ?, ?, 'test')",
+        )
+        .run(LEAF_SCHEMA_TOML, Date.now());
+    });
+
+    it("rejects a leaf parent with 422 when both endpoints exist", async () => {
+      await createEntity("leaf-parent", "task");
+      await createEntity("child", "task");
+
+      const res = await postRelationship(
+        "leaf-parent",
+        "child",
+        "parent-child",
+      );
+
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code).toBe("constraint-violation");
+      expect(count("entity_relationships")).toBe(0);
+    });
+
+    it("reports a missing to_id before the leaf check", async () => {
+      await createEntity("leaf-parent", "task");
+
+      await expectMissing(
+        await postRelationship("leaf-parent", "ghost-child", "parent-child"),
+        "ghost-child",
+      );
+    });
+
+    it("reports a missing parent as 404", async () => {
+      await createEntity("child", "task");
+
+      await expectMissing(
+        await postRelationship("ghost-parent", "child", "parent-child"),
+        "ghost-parent",
+      );
+    });
+
+    it("allows a non-leaf parent", async () => {
+      await createEntity("epic-1", "epic");
+      await createEntity("child", "task");
+
+      const res = await postRelationship("epic-1", "child", "parent-child");
+      expect(res.status).toBe(201);
+    });
   });
 });

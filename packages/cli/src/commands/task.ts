@@ -22,6 +22,12 @@ import {
   tsToIso,
   withSpinner,
 } from "../lib/output";
+import {
+  CLOSE_OUTCOME_HELP,
+  TaskCloseError,
+  parseCloseOutcome,
+  resolveCloseTarget,
+} from "../lib/task-close";
 
 // --- Relationship type alias map + validation helper ---
 const TYPE_ALIASES: Record<string, string> = {
@@ -754,31 +760,61 @@ export default defineCommand({
       },
     }),
     close: defineCommand({
-      meta: { name: "close", description: "Close a task" },
+      meta: {
+        name: "close",
+        description:
+          "Close a task into the terminal state its lifecycle declares for the outcome",
+      },
       args: {
         id: { type: "positional", description: "Task ID", required: true },
         outcome: {
           type: "string",
-          description: "Outcome (completed|cancelled|deferred)",
+          description: `Outcome (${CLOSE_OUTCOME_HELP})`,
           required: true,
         },
         ...jsonArg,
       },
       async run({ args }) {
-        const { entity } = await resolveContext();
-        const result = await entity.update(args.id as string, {
-          status: "closed",
-          outcome: args.outcome,
-        });
-        if (args.json) {
-          printJson({
-            ok: true,
-            id: result.id,
-            outcome: args.outcome as string,
+        const id = args.id as string;
+        try {
+          // Reject unknown outcomes before opening any backend.
+          const outcome = parseCloseOutcome(args.outcome);
+          const { entity, schema } = await resolveContext();
+          const task = await entity.get(id);
+          if (!task) {
+            throw new TaskCloseError(
+              TILA_ERRORS.NOT_FOUND,
+              `Task ${id} not found`,
+            );
+          }
+          // Resolve the terminal state from the applied schema before writing:
+          // only the declared lifecycle field is updated, never `status` or
+          // `outcome` by name.
+          const target = resolveCloseTarget(
+            await schema.getCurrentSchema(),
+            task.type,
+            outcome,
+          );
+          const result = await entity.update(id, {
+            [target.field]: target.state,
           });
-          return;
+          if (args.json) {
+            printJson({
+              ok: true,
+              id: result.id,
+              outcome: args.outcome as string,
+              lifecycle_outcome: target.outcome,
+              field: target.field,
+              state: target.state,
+            });
+            return;
+          }
+          outputText(
+            `Closed task ${result.id} with outcome: ${args.outcome}; ${target.field} set to ${target.state}`,
+          );
+        } catch (err) {
+          failWithCliError(err, Boolean(args.json));
         }
-        outputText(`Closed task ${result.id} with outcome: ${args.outcome}`);
       },
     }),
     archive: defineCommand({

@@ -12,6 +12,7 @@
  *   - `task artifact-ref add` / `list`
  */
 
+import { readFileSync } from "node:fs";
 import {
   type BlobStore,
   EmbeddedArtifactBackend,
@@ -29,6 +30,7 @@ import Database from "better-sqlite3";
 import type { CommandDef, SubCommandsDef } from "citty";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { generateDefaultSchemaToml } from "../../lib/provisioning";
 
 // Spinner is a no-op so withSpinner resolves synchronously.
 vi.mock("yocto-spinner", () => ({
@@ -227,6 +229,7 @@ describe("task commands (local mode, real EmbeddedProject)", () => {
       machine: "test-machine",
       entity: project,
       coordination: project,
+      schema: project,
     });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -580,6 +583,263 @@ failure = "failed"
       entity_id: "T-ref",
       artifact_key: "plans/T-ref/abc.md",
       slot: "plan",
+    });
+  });
+
+  describe("close", () => {
+    const BUNDLED_SCHEMA = readFileSync(
+      new URL("../../../../../tila.schema.toml", import.meta.url),
+      "utf8",
+    );
+    const apply = (definition: string) =>
+      project.applySchema({ definition, expected_revision: 0 });
+    const lastJson = (spy: ReturnType<typeof vi.spyOn>) =>
+      JSON.parse(spy.mock.calls.at(-1)?.[0] as string);
+
+    async function expectRefused(
+      id: string,
+      outcome: string,
+      kind: string,
+      message: RegExp,
+    ) {
+      const before = (await project.get(id))?.data;
+      await runCmd(getSubCommand(await loadCommand(), "close"), {
+        id,
+        outcome,
+        json: true,
+      });
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const envelope = lastJson(errorSpy);
+      expect(envelope).toMatchObject({ ok: false, error: { kind } });
+      expect(envelope.error.message).toMatch(message);
+      // Refused before any write: the entity is exactly as seeded.
+      expect((await project.get(id))?.data).toEqual(before);
+      return envelope;
+    }
+
+    it.each([
+      ["generated", () => generateDefaultSchemaToml()],
+      ["bundled", () => BUNDLED_SCHEMA],
+    ])(
+      "%s schema maps each outcome to its declared terminal state",
+      async (_name, definition) => {
+        await apply(definition());
+        const close = getSubCommand(await loadCommand(), "close");
+        const cases: [string, string, string][] = [
+          ["completed", "success", "done"],
+          ["success", "success", "done"],
+          ["failure", "failure", "failed"],
+          ["cancelled", "cancelled", "cancelled"],
+          ["deferred", "abandoned", "deferred"],
+          ["abandoned", "abandoned", "deferred"],
+        ];
+        for (const [outcome, canonical, status] of cases) {
+          const id = `T-${outcome}`;
+          await seedTask(id, { status: "in_progress", title: outcome });
+          await runCmd(close, { id, outcome, json: true });
+          // Only the lifecycle field changes; no `outcome` field is stored.
+          expect((await project.get(id))?.data).toEqual({
+            status,
+            title: outcome,
+          });
+          expect(lastJson(logSpy).result).toMatchObject({
+            id,
+            outcome,
+            lifecycle_outcome: canonical,
+            field: "status",
+            state: status,
+          });
+        }
+        expect(errorSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it("reports the written state in text mode", async () => {
+      await apply(generateDefaultSchemaToml());
+      await seedTask("T-text", { status: "open", title: "Text" });
+      await runCmd(getSubCommand(await loadCommand(), "close"), {
+        id: "T-text",
+        outcome: "completed",
+      });
+      expect(logSpy.mock.calls.at(-1)?.[0]).toBe(
+        "Closed task T-text with outcome: completed; status set to done",
+      );
+    });
+
+    it("honors a custom type, lifecycle field and outcome mapping", async () => {
+      await apply(`schema_version = 1
+
+[work_units.ticket]
+fields = [
+  { name = "title", required = true, type = "string" },
+  { name = "phase", required = true, type = "enum", values = ["todo", "doing", "shipped", "dropped"] },
+]
+parents = []
+
+[work_units.ticket.lifecycle]
+field = "phase"
+dispatchable = ["todo"]
+terminal = ["shipped", "dropped"]
+dependency_satisfied = ["shipped"]
+on_start = "doing"
+
+[work_units.ticket.lifecycle.outcomes]
+success = "shipped"
+cancelled = "dropped"
+`);
+      await project.create({
+        id: "K-1",
+        type: "ticket",
+        data: { title: "Ship it", phase: "doing" },
+        created_by: "cli",
+      });
+      await runCmd(getSubCommand(await loadCommand(), "close"), {
+        id: "K-1",
+        outcome: "completed",
+        json: true,
+      });
+      expect((await project.get("K-1"))?.data).toEqual({
+        title: "Ship it",
+        phase: "shipped",
+      });
+      expect(lastJson(logSpy).result).toMatchObject({
+        field: "phase",
+        state: "shipped",
+      });
+    });
+
+    it("refuses when no schema is applied", async () => {
+      await seedTask("T-none", { status: "open", title: "None" });
+      await expectRefused(
+        "T-none",
+        "completed",
+        "constraint-violation",
+        /No schema is applied/,
+      );
+    });
+
+    it("refuses a schema that declares no lifecycle, with apply guidance", async () => {
+      // The shape `tila project create` generated before lifecycle outcomes.
+      await apply(`schema_version = 1
+
+[work_units.task]
+fields = [
+  { name = "title", required = true, type = "string" },
+  { name = "status", required = true, type = "enum", values = ["open", "in_progress", "blocked", "done", "cancelled"] },
+]
+parents = []
+`);
+      await seedTask("T-legacy", { status: "open", title: "Legacy" });
+      const envelope = await expectRefused(
+        "T-legacy",
+        "completed",
+        "constraint-violation",
+        /declares no lifecycle/,
+      );
+      expect(envelope.error.hint).toMatch(/tila schema apply/);
+    });
+
+    it("refuses an outcome the lifecycle does not map and still closes mapped ones", async () => {
+      // Bundled sample as it was before #522: only success and cancelled.
+      await apply(`schema_version = 1
+
+[work_units.task]
+fields = [
+  { name = "title", required = true, type = "string" },
+  { name = "status", required = true, type = "enum", values = ["open", "in_progress", "blocked", "done", "cancelled"] },
+]
+parents = []
+
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "cancelled"]
+dependency_satisfied = ["done"]
+on_start = "in_progress"
+
+[work_units.task.lifecycle.outcomes]
+success = "done"
+cancelled = "cancelled"
+`);
+      await seedTask("T-fail", { status: "open", title: "Fail" });
+      await expectRefused(
+        "T-fail",
+        "failure",
+        "constraint-violation",
+        /does not map outcome "failure"/,
+      );
+      await expectRefused(
+        "T-fail",
+        "deferred",
+        "constraint-violation",
+        /does not map outcome "abandoned"/,
+      );
+      await runCmd(getSubCommand(await loadCommand(), "close"), {
+        id: "T-fail",
+        outcome: "completed",
+        json: true,
+      });
+      expect((await project.get("T-fail"))?.data.status).toBe("done");
+    });
+
+    it("refuses an outcome mapped to a non-terminal state", async () => {
+      await apply(`schema_version = 1
+
+[work_units.task]
+fields = [
+  { name = "title", required = true, type = "string" },
+  { name = "status", required = true, type = "enum", values = ["open", "review", "done"] },
+]
+parents = []
+
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done"]
+dependency_satisfied = ["done"]
+
+[work_units.task.lifecycle.outcomes]
+success = "review"
+`);
+      await seedTask("T-review", { status: "open", title: "Review" });
+      await expectRefused(
+        "T-review",
+        "success",
+        "constraint-violation",
+        /"review", which is not a terminal state/,
+      );
+    });
+
+    it.each(["closed", "failed", "done", ""])(
+      "rejects outcome %j before opening the backend",
+      async (outcome) => {
+        mockResolveContext.mockClear();
+        await runCmd(getSubCommand(await loadCommand(), "close"), {
+          id: "T-1",
+          outcome,
+          json: true,
+        });
+        expect(mockResolveContext).not.toHaveBeenCalled();
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(lastJson(errorSpy)).toMatchObject({
+          ok: false,
+          error: { kind: "validation-error" },
+        });
+      },
+    );
+
+    it("reports an unknown task before reading the schema", async () => {
+      await apply(generateDefaultSchemaToml());
+      await runCmd(getSubCommand(await loadCommand(), "close"), {
+        id: "missing",
+        outcome: "completed",
+        json: true,
+      });
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(lastJson(errorSpy)).toMatchObject({
+        ok: false,
+        error: { kind: "not-found" },
+      });
     });
   });
 });
