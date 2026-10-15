@@ -1494,9 +1494,10 @@ does not read the record back:
 Set record service/api (fence 9; write receipt, revision not returned)
 ```
 
-`--json` prints the stored row in the first case and
-`{ "receipt": true, "type": "service", "key": "api", "fence": 9 }` in the
-second; `receipt` tells them apart. A rejected write (stale fence, denied or
+`--json` wraps either the stored row or the receipt in the usual `ok`/`result`
+envelope; for a receipt the printed document is
+`{ "ok": true, "result": { "receipt": true, "type": "service", "key": "api", "fence": 9 } }`.
+`receipt` tells the two apart. A rejected write (stale fence, denied or
 undeclared type) is an error in both cases and prints no success line.
 
 ### `patch`
