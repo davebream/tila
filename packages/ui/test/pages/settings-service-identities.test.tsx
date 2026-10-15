@@ -278,6 +278,75 @@ test("a binding policy is replaced from a preset", async () => {
   ]);
 });
 
+test("editing a binding that limits record reads and writes separately keeps both limits", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ workload_bindings_manage: true }));
+  const restrictions = {
+    task_types: ["bug"],
+    records_read: [{ type: "answer", key_prefixes: ["a1"] }],
+    records_write: [{ type: "question", key_prefixes: ["q1"] }],
+  };
+  const api = servicesApi({
+    bindings: [
+      () =>
+        HttpResponse.json({
+          ok: true,
+          bindings: [
+            {
+              ...binding,
+              policy: {
+                role: "participant",
+                capabilities: CREDENTIAL_PRESETS.worker.capabilities,
+                restrictions,
+              },
+            },
+          ],
+        }),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Workload bindings of ci-bot" }),
+  );
+  const drawer = await screen.findByRole("dialog", {
+    name: /Workload bindings · CI bot/,
+  });
+  // The list says what the binding may read and write.
+  expect(
+    await within(drawer).findByText(
+      /records read: answer · records write: question/,
+    ),
+  ).toBeInTheDocument();
+  await user.click(
+    await within(drawer).findByRole("button", {
+      name: "Edit policy of deploy",
+    }),
+  );
+  const form = within(drawer).getByRole("form", { name: "Policy of deploy" });
+  // Shown, not editable as a list that could be saved back as unrestricted.
+  const records = within(form).getByRole("textbox", {
+    name: /Limit to records/,
+  });
+  expect(records).toBeDisabled();
+  expect(records).toHaveValue("read: answer/a1\nwrite: question/q1");
+
+  await user.selectOptions(
+    within(form).getByRole("combobox", { name: /Role ceiling/ }),
+    "viewer",
+  );
+  await user.click(within(form).getByRole("button", { name: "Save policy" }));
+
+  expect(
+    await within(drawer).findByText(/Saved the policy of deploy/),
+  ).toBeInTheDocument();
+  const sent = writes(api.sent);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].body).toMatchObject({
+    expected_revision: 1,
+    policy: { role: "viewer", restrictions },
+  });
+});
+
 test("a new GitHub Actions binding defaults the issuer", async () => {
   const user = userEvent.setup();
   server.use(sessionStatusWith({ workload_bindings_manage: true }));
