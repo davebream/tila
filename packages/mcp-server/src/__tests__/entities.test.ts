@@ -133,6 +133,40 @@ describe("registerEntityTools", () => {
       expect(result).toHaveProperty("structuredContent", { result: page });
     });
 
+    it("passes the state filter and sort through to the SDK", async () => {
+      facade.tasks.list.mockResolvedValue({ ok: true, entities: [] });
+      await findHandler("tila_task_list")({
+        state: ["in-review", "done"],
+        sort: "state",
+        order: "desc",
+        limit: 5,
+      });
+      expect(facade.tasks.list).toHaveBeenCalledWith({
+        type: undefined,
+        status: undefined,
+        compact: true,
+        state: ["in-review", "done"],
+        sort: "state",
+        order: "desc",
+        limit: "5",
+      });
+    });
+
+    it("advertises state and the shared sort keys, and rejects blank states", () => {
+      const tool = server.tool.mock.calls.find(
+        (call) => call[0] === "tila_task_list",
+      );
+      const input = tool?.[2];
+      expect(input.state.safeParse(["in-review", "done"]).success).toBe(true);
+      expect(input.state.safeParse([]).success).toBe(false);
+      expect(input.state.safeParse([""]).success).toBe(false);
+      expect(input.state.safeParse(["  "]).success).toBe(false);
+      for (const sort of ["created_at", "status", "state", "id"])
+        expect(input.sort.safeParse(sort).success).toBe(true);
+      expect(input.sort.safeParse("outcome").success).toBe(false);
+      expect(input.order.safeParse("sideways").success).toBe(false);
+    });
+
     it("advertises the shared lifecycle enum and rejects empty or invalid outcomes", () => {
       const tool = server.tool.mock.calls.find(
         (call) => call[0] === "tila_task_list",

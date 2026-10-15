@@ -154,6 +154,32 @@ describe("createTaskMethods — outgoing request shape", () => {
     ).toBe(false);
   });
 
+  it("serializes the state filter and state sort as the server reads them", async () => {
+    mockFetch.mockResolvedValueOnce(ok({ ok: true, entities: [] }));
+    await tasks().list({
+      state: ["in-review", "done"],
+      sort: "state",
+      order: "desc",
+      limit: "5",
+    });
+    const query = new URL(mockFetch.mock.calls[0][0]).searchParams;
+    expect(query.get("state")).toBe("in-review,done");
+    expect(query.get("sort")).toBe("state");
+    expect(query.get("order")).toBe("desc");
+    // Left unset, the filter is not sent and `status` stays a separate filter.
+    mockFetch.mockResolvedValueOnce(ok({ ok: true, entities: [] }));
+    await tasks().list({ status: "open" });
+    const plain = new URL(mockFetch.mock.calls[1][0]).searchParams;
+    expect(plain.has("state")).toBe(false);
+    expect(plain.get("status")).toBe("open");
+  });
+
+  it("rejects empty and blank state lists before sending HTTP", async () => {
+    for (const state of [[], [""], ["  "], ["done", ""]])
+      await expect(tasks().list({ state })).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid and empty outcome lists before sending HTTP", async () => {
     for (const outcome of [[], ["failed"], ["failure", ""]])
       await expect(

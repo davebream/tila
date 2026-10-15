@@ -161,6 +161,36 @@ describe("RemoteBackend", () => {
       expect(client.get.mock.calls[1][1].query).not.toHaveProperty("blocked");
     });
 
+    it("listPage sends the state filter and sort, and refuses blank states", async () => {
+      client.get.mockResolvedValue({
+        ok: true,
+        entities: [],
+        total: 0,
+        limit: 4,
+        offset: 0,
+        has_more: false,
+        next_cursor: null,
+        scope: { restricted: false },
+      });
+      const backend = await createBackend(client);
+      await backend.listPage({
+        state: ["in-review", "done"],
+        sort: "state",
+        order: "asc",
+        limit: 4,
+      });
+      expect(client.get.mock.calls[0][1].query).toEqual({
+        state: "in-review,done",
+        sort: "state",
+        order: "asc",
+        limit: "4",
+      });
+      client.get.mockClear();
+      for (const state of [[], [""], ["   "]])
+        await expect(backend.listPage({ state })).rejects.toThrow();
+      expect(client.get).not.toHaveBeenCalled();
+    });
+
     it("reports unsupported page metadata explicitly for an older server", async () => {
       client.get.mockResolvedValue({
         ok: true,
