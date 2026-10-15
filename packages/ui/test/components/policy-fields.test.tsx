@@ -214,3 +214,55 @@ describe("PolicyFields with a split policy", () => {
     });
   });
 });
+
+describe("an untouched policy keeps its explicit empty limits", () => {
+  const STORED: NamespaceRestrictions[] = [
+    // Each of these denies; none may come back as "no limit".
+    { records: [] },
+    { records: [{ type: "config", key_prefixes: [] }] },
+    { records: [{ type: "a", key_prefixes: [] }, { type: "b" }] },
+    { task_types: [] },
+    { task_types: [], records: [{ type: "config" }] },
+    { task_types: ["bug"], records: [] },
+    // Two rules for one type: the lines cannot say which rule held what.
+    {
+      records: [
+        { type: "a", key_prefixes: ["x"] },
+        { type: "a", key_prefixes: ["y"] },
+      ],
+    },
+  ];
+
+  it.each(STORED)("is saved as it was opened: %j", (restrictions) => {
+    const original = policy(restrictions);
+    const form = policyToForm(original);
+    expect(PolicyForm.safeParse(form).success).toBe(true);
+    expect(saved(form)).toStrictEqual(original);
+    // ...also after the form was kept as a browser draft.
+    expect(
+      saved(PolicyForm.parse(JSON.parse(JSON.stringify(form)))),
+    ).toStrictEqual(original);
+  });
+
+  it("is not changed by a role or capability edit", () => {
+    for (const restrictions of STORED) {
+      const form = policyToForm(policy(restrictions));
+      const out = saved({
+        ...form,
+        preset: "custom",
+        role: "maintainer",
+        capabilities: ["records:read"],
+      });
+      expect(out.restrictions).toStrictEqual(restrictions);
+    }
+  });
+
+  it("still lets an edited list replace the stored one", () => {
+    const form = policyToForm(policy({ records: [], task_types: [] }));
+    const out = saved({ ...form, records: "config", task_types: "bug" });
+    expect(out.restrictions).toStrictEqual({
+      task_types: ["bug"],
+      records: [{ type: "config" }],
+    });
+  });
+});
