@@ -536,6 +536,63 @@ it("validates the HTTP facade results and preserves remote continuity recovery c
   ).toBe(true);
 });
 
+it("sends replay filters through inspect changes and returns empty pages that still advance", async () => {
+  const { a } = await fixture();
+  const requests: Request[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(url, init);
+      requests.push(request);
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/presence/heartbeat"))
+        return Response.json({ ok: true });
+      if (path.endsWith("/reentry")) return Response.json(await a.reentry());
+      return Response.json({
+        ok: true,
+        events: [],
+        next_after_seq: 1000,
+        through_seq: 2500,
+        has_more: true,
+      });
+    }),
+  );
+  const facade = await createTila(
+    {
+      project_id: "workflow",
+      backend: "cloudflare",
+      worker_url: "https://fixture.invalid",
+      schema_version: 0,
+      tila_version: "0",
+      created_at: new Date(0).toISOString(),
+    },
+    "fixture-token",
+    { participantId: "remote-session" },
+  );
+  cleanup.push(() => facade.close());
+  const client = await connect(facade);
+  await call(client, "tila_session", { action: "open" });
+  const page = await call(client, "tila_inspect", {
+    action: "changes",
+    after_seq: 0,
+    event_name: "pipeline.tests_passed",
+    correlation_id: "run-123",
+  });
+  expect(page).toMatchObject({
+    events: [],
+    next_after_seq: 1000,
+    through_seq: 2500,
+    has_more: true,
+  });
+  const replay = requests.find((request) =>
+    new URL(request.url).pathname.endsWith("/journal/replay"),
+  );
+  const params = new URL(replay?.url ?? "https://missing.invalid").searchParams;
+  expect(params.get("event_name")).toBe("pipeline.tests_passed");
+  expect(params.get("correlation_id")).toBe("run-123");
+  expect(params.get("after_seq")).toBe("0");
+});
+
 it("calls the complete primitive catalog and compatibility aliases through MCP with typed legacy results", async () => {
   vi.stubEnv("TILA_MCP_COMPAT_ALIASES", "1");
   const { a } = await fixture();

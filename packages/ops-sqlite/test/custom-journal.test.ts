@@ -3,12 +3,14 @@ import {
   CREDENTIAL_PRESETS,
   CUSTOM_REPORT_RETENTION_MS,
   type JournalAppendRequest,
+  type ProjectRole,
 } from "@tila/schemas";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acknowledge, getCursor, replaySnapshot } from "../src/continuity-ops";
 import { acquire } from "../src/coordination-ops";
 import {
+  CORRECTION_CHAIN_LIMIT,
   appendReport,
   validateJournalReportBackupRow,
 } from "../src/custom-journal-ops";
@@ -37,6 +39,7 @@ const send = (
     origin,
     input: { ...input, ...change },
     idempotencyKey: key,
+    authorizedRole: "participant",
     now,
     ...options,
   });
@@ -391,5 +394,380 @@ describe("authenticated custom reports", () => {
       [],
     );
     expect(listJournal(fixture.db, {})[0].seq).toBe(first.response.event.seq);
+  });
+});
+
+describe("report correction authority", () => {
+  const reporter = testOrigin("reporter-process", "principal-reporter");
+  const other = testOrigin("other-process", "principal-other");
+  const maintainer = testOrigin("maintainer-process", "principal-maintainer");
+  const owner = testOrigin("owner-process", "principal-owner");
+  const denied = { code: "report-correction-denied", status: 403 };
+  /** The Worker's resolved role and the credential policy that carries it. */
+  const as = (who: typeof origin, role: ProjectRole = "participant") => ({
+    origin: who,
+    authorizedRole: role,
+    policy: { ...CREDENTIAL_PRESETS.worker, role },
+  });
+  const state = () => ({
+    journal: fixture.db.select().from(schema.journal).all(),
+    receipts: fixture.db.select().from(schema.journalReportReceipts).all(),
+    rates: fixture.db.select().from(schema.journalReportRates).all(),
+  });
+  /** A stored report written outside appendReport, for history it would not produce. */
+  function rawEvent(
+    principal: string,
+    data: unknown,
+    kind = "custom.reported",
+  ) {
+    return fixture.db
+      .insert(schema.journal)
+      .values({
+        t: now,
+        kind,
+        resource: "project:project",
+        principal_id: principal,
+        participant_id: "raw-process",
+        environment: "{}",
+        actor: "",
+        data: JSON.stringify(data),
+      })
+      .returning()
+      .get().seq;
+  }
+  const seqOf = (result: Awaited<ReturnType<typeof send>>) =>
+    result.response.event.seq;
+
+  it("refuses an unrelated participant before any journal, receipt or rate write", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const correction = seqOf(
+      await send("fix", { corrects_seq: root }, as(reporter)),
+    );
+    const before = state();
+    for (const target of [root, correction]) {
+      await expect(
+        send(`intruder-${target}`, { corrects_seq: target }, as(other)),
+      ).rejects.toMatchObject(denied);
+      // The answer is stable on retry and does not depend on the key.
+      await expect(
+        send(`intruder-${target}`, { corrects_seq: target }, as(other)),
+      ).rejects.toMatchObject(denied);
+    }
+    expect(state()).toEqual(before);
+  });
+
+  it("lets the original reporter correct the original and later corrections, including past a maintainer's", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const byMaintainer = await send(
+      "maintainer-fix",
+      { corrects_seq: root, data: { passed: 2 } },
+      as(maintainer, "maintainer"),
+    );
+    // The recorded corrector is the actual principal, not the original reporter.
+    expect(byMaintainer.response.event.principal_id).toBe(
+      maintainer.principalId,
+    );
+    const first = await send(
+      "reporter-fix",
+      { corrects_seq: seqOf(byMaintainer), data: { passed: 3 } },
+      as(reporter),
+    );
+    const second = await send(
+      "reporter-fix-again",
+      { corrects_seq: seqOf(first), data: { passed: 4 } },
+      as(reporter),
+    );
+    expect(first.response.event.principal_id).toBe(reporter.principalId);
+    expect(second.response.event.principal_id).toBe(reporter.principalId);
+    // Correcting the original after it was superseded is still the reporter's right.
+    expect(
+      (await send("reporter-original", { corrects_seq: root }, as(reporter)))
+        .response.event.principal_id,
+    ).toBe(reporter.principalId);
+  });
+
+  it("does not let a maintainer's correction transfer authorship", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const byMaintainer = seqOf(
+      await send(
+        "maintainer-fix",
+        { corrects_seq: root },
+        as(maintainer, "maintainer"),
+      ),
+    );
+    const before = state();
+    // Another participant cannot correct the maintainer's event or the original.
+    for (const target of [root, byMaintainer])
+      await expect(
+        send(`other-${target}`, { corrects_seq: target }, as(other)),
+      ).rejects.toMatchObject(denied);
+    // The maintainer acting without maintainer authority is not the reporter.
+    await expect(
+      send("demoted", { corrects_seq: byMaintainer }, as(maintainer)),
+    ).rejects.toMatchObject(denied);
+    expect(state()).toEqual(before);
+  });
+
+  it("allows maintainer and owner overrides, recording the real corrector, and replays them once", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    for (const [who, role] of [
+      [maintainer, "maintainer"],
+      [owner, "owner"],
+    ] as const) {
+      const key = `override-${role}`;
+      const accepted = await send(key, { corrects_seq: root }, as(who, role));
+      expect(accepted.replayed).toBe(false);
+      expect(accepted.response.event).toMatchObject({
+        principal_id: who.principalId,
+        participant_id: who.participantId,
+        kind: "custom.reported",
+      });
+      const before = state();
+      const replay = await send(key, { corrects_seq: root }, as(who, role));
+      expect(replay).toEqual({ response: accepted.response, replayed: true });
+      expect(state()).toEqual(before);
+    }
+  });
+
+  it("replays an accepted reporter correction without a second event or rate count", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const accepted = await send("fix", { corrects_seq: root }, as(reporter));
+    const before = state();
+    const replay = await send("fix", { corrects_seq: root }, as(reporter));
+    expect(replay).toEqual({ response: accepted.response, replayed: true });
+    expect(state()).toEqual(before);
+  });
+
+  it("takes authority only from the authenticated principal and the Worker-resolved role", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const before = state();
+    for (const forged of [
+      { actor: reporter.principalId },
+      { role: "owner" },
+      { authorized_role: "owner" },
+      { principal_id: reporter.principalId },
+      { participant_id: reporter.participantId },
+    ])
+      await expect(
+        send(
+          `forged-${Object.keys(forged)[0]}`,
+          { corrects_seq: root, ...forged } as Partial<JournalAppendRequest>,
+          as(other),
+        ),
+      ).rejects.toThrow();
+    // A reporter's participant label proves nothing about the principal.
+    await expect(
+      send(
+        "participant-label",
+        { corrects_seq: root },
+        as(testOrigin(reporter.participantId, other.principalId)),
+      ),
+    ).rejects.toMatchObject(denied);
+    // A credential ceiling lowers the resolved role; a policy cannot raise it.
+    await expect(
+      send(
+        "ceiling",
+        { corrects_seq: root },
+        {
+          ...as(other),
+          authorizedRole: "owner",
+        },
+      ),
+    ).rejects.toMatchObject(denied);
+    await expect(
+      send(
+        "raised",
+        { corrects_seq: root },
+        {
+          origin: other,
+          authorizedRole: "participant",
+          policy: { ...CREDENTIAL_PRESETS.worker, role: "owner" },
+        },
+      ),
+    ).rejects.toMatchObject(denied);
+    expect(state()).toEqual(before);
+  });
+
+  it("leaves reports that do not correct anything open to any participant", async () => {
+    await send("root", {}, as(reporter));
+    const unrelated = await send("unrelated", {}, as(other));
+    expect(unrelated.replayed).toBe(false);
+    expect(unrelated.response.event.principal_id).toBe(other.principalId);
+  });
+
+  describe.each([
+    ["live", false],
+    ["archived", true],
+  ])("%s history", (_name, archived) => {
+    /** root (reporter) <- middle (maintainer) <- tail (reporter), optionally archived. */
+    async function chain() {
+      const root = seqOf(await send("root", {}, as(reporter)));
+      const middle = seqOf(
+        await send(
+          "middle",
+          { corrects_seq: root },
+          as(maintainer, "maintainer"),
+        ),
+      );
+      const tail = seqOf(
+        await send("tail", { corrects_seq: middle }, as(reporter)),
+      );
+      if (!archived) return { root, middle, tail, archives: undefined };
+      const events = listJournal(fixture.db, {});
+      fixture.db
+        .delete(schema.journal)
+        .where(eq(schema.journal.seq, root))
+        .run();
+      fixture.db
+        .delete(schema.journal)
+        .where(eq(schema.journal.seq, middle))
+        .run();
+      fixture.db
+        .insert(schema.journalArchiveWatermark)
+        .values({ id: 1, last_archived_seq: middle, archived_at: now })
+        .run();
+      return {
+        root,
+        middle,
+        tail,
+        archives: {
+          async *read() {
+            yield* events;
+          },
+        },
+      };
+    }
+
+    it("applies the same authority rules", async () => {
+      const { root, middle, tail, archives } = await chain();
+      const before = state();
+      for (const target of [root, middle, tail])
+        await expect(
+          send(
+            `other-${target}`,
+            { corrects_seq: target },
+            { ...as(other), archives },
+          ),
+        ).rejects.toMatchObject(denied);
+      expect(state()).toEqual(before);
+      for (const target of [root, middle, tail]) {
+        const accepted = await send(
+          `reporter-${target}`,
+          { corrects_seq: target },
+          { ...as(reporter), archives },
+        );
+        expect(accepted.response.event.principal_id).toBe(reporter.principalId);
+      }
+      const override = await send(
+        "override",
+        { corrects_seq: tail },
+        { ...as(owner, "owner"), archives },
+      );
+      expect(override.response.event.principal_id).toBe(owner.principalId);
+    });
+
+    it("fails closed without a trace when needed history cannot be read", async () => {
+      const { middle, tail } = await chain();
+      const before = state();
+      if (archived) {
+        // The root is unreachable, so nobody whose authority depends on it is let through.
+        for (const who of [reporter, other])
+          await expect(
+            send(`${who.principalId}-tail`, { corrects_seq: tail }, as(who)),
+          ).rejects.toMatchObject({ code: "journal-history-unavailable" });
+        // A maintainer needs the report being corrected, which is archived here.
+        await expect(
+          send(
+            "override-middle",
+            { corrects_seq: middle },
+            as(maintainer, "maintainer"),
+          ),
+        ).rejects.toMatchObject({ code: "journal-history-unavailable" });
+        expect(state()).toEqual(before);
+      } else {
+        // Nothing is archived, so the same requests resolve without any archive reader.
+        expect(
+          (await send("reporter-tail", { corrects_seq: tail }, as(reporter)))
+            .response.event.seq,
+        ).toBe(tail + 1);
+      }
+    });
+  });
+
+  it("does not read lineage for a maintainer override", async () => {
+    const root = seqOf(await send("root", {}, as(reporter)));
+    const tail = seqOf(
+      await send("tail", { corrects_seq: root }, as(reporter)),
+    );
+    fixture.db.delete(schema.journal).where(eq(schema.journal.seq, root)).run();
+    fixture.db
+      .insert(schema.journalArchiveWatermark)
+      .values({ id: 1, last_archived_seq: root, archived_at: now })
+      .run();
+    // The archived root is unreachable, but the live report being corrected is enough.
+    expect(
+      (
+        await send(
+          "override",
+          { corrects_seq: tail },
+          as(maintainer, "maintainer"),
+        )
+      ).response.event.principal_id,
+    ).toBe(maintainer.principalId);
+    await expect(
+      send("reporter", { corrects_seq: tail }, as(reporter)),
+    ).rejects.toMatchObject({ code: "journal-history-unavailable" });
+  });
+
+  it("fails closed on a lineage link that is not a report or does not point back", async () => {
+    createEntity(fixture.db, { id: "not-a-report" }); // sequence 1, a task event
+    const reporterEvent = (change: Partial<JournalAppendRequest>) =>
+      rawEvent(reporter.principalId, { ...input, ...change });
+    const pointsAtTask = reporterEvent({ corrects_seq: 1 });
+    const pointsForward = reporterEvent({ corrects_seq: 99 });
+    const malformed = rawEvent(reporter.principalId, { not: "a report" });
+    const pointsAtMalformed = reporterEvent({ corrects_seq: malformed });
+    const before = state();
+    for (const target of [pointsAtTask, pointsForward, pointsAtMalformed])
+      for (const who of [reporter, other])
+        await expect(
+          send(
+            `${who.principalId}-${target}`,
+            { corrects_seq: target },
+            as(who),
+          ),
+        ).rejects.toMatchObject({ code: "journal-history-unavailable" });
+    // A malformed event is not a report, so it can never be the target.
+    await expect(
+      send(
+        "malformed",
+        { corrects_seq: malformed },
+        as(maintainer, "maintainer"),
+      ),
+    ).rejects.toMatchObject({ code: "validation-error" });
+    expect(state()).toEqual(before);
+  });
+
+  it("verifies a reporter through a bounded chain and leaves longer ones to maintainers", async () => {
+    let tail = seqOf(await send("root", {}, as(reporter)));
+    for (let i = 0; i < CORRECTION_CHAIN_LIMIT; i++)
+      tail = rawEvent(reporter.principalId, { ...input, corrects_seq: tail });
+    const atLimit = seqOf(
+      await send("at-limit", { corrects_seq: tail }, as(reporter)),
+    );
+    const before = state();
+    await expect(
+      send("past-limit", { corrects_seq: atLimit }, as(reporter)),
+    ).rejects.toMatchObject(denied);
+    expect(state()).toEqual(before);
+    expect(
+      (
+        await send(
+          "past-limit-maintainer",
+          { corrects_seq: atLimit },
+          as(maintainer, "maintainer"),
+        )
+      ).response.event.seq,
+    ).toBe(atLimit + 1);
   });
 });

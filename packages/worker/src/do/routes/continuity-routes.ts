@@ -14,6 +14,8 @@ export function createContinuityRoutes(deps: RouterDeps) {
           after_seq: Number(c.req.query("after_seq")),
           through_seq: number(c.req.query("through_seq")),
           limit: number(c.req.query("limit")),
+          event_name: c.req.query("event_name"),
+          correlation_id: c.req.query("correlation_id"),
         }),
       ),
     ),

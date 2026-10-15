@@ -788,6 +788,40 @@ events, newest first. With `after_seq` it returns the next `limit` events after
 that sequence, oldest first, so advancing `after_seq` to the last `seq` pages
 forward without skipping events. Replay includes archived history; missing or
 unreadable history fails explicitly.
+
+#### Finding a report by name or correlation
+
+`journal.replay()` also takes `event_name` and `correlation_id`. They select
+project reports (`custom.reported`) by exact value, and both must match when
+both are given. Unlike `journal.query()`, the search covers archived history, so
+it finds reports older than the 90-day archive boundary.
+
+```ts
+let page = await tila.journal.replay({
+  after_seq: 0,
+  correlation_id: "run-123",
+});
+const found = [...page.events];
+while (page.has_more) {
+  page = await tila.journal.replay({
+    after_seq: page.next_after_seq,
+    through_seq: page.through_seq,
+    correlation_id: "run-123",
+  });
+  found.push(...page.events);
+}
+```
+
+A filtered request examines at most 1000 sequences (`JOURNAL_REPLAY_SCAN_BUDGET`)
+and `limit` caps the matches it returns, so a page can be empty while
+`has_more` is `true`. Loop on `has_more`, never on page size.
+`next_after_seq` is the last sequence examined, or the last match returned when
+`limit` was reached, so following it neither skips nor repeats events. History
+is verified complete before any filter runs: a missing sequence fails with
+`journal-history-unavailable` even when nothing would have matched. Filtered
+replay is a lookup; do not acknowledge its `next_after_seq`, because the
+participant has not processed the events the filter skipped.
+
 `getCursor()` and `acknowledge()` return `{ ok, cursor: { seq, updated_at } }`.
 Acknowledgements never move backwards, reject future positions, and survive
 presence expiry. Reads do not automatically acknowledge signals or journal events.

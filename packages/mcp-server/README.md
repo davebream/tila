@@ -88,6 +88,13 @@ not acknowledge events/signals or renew claims. Replay uses `next_after_seq` and
 `through_seq`; acknowledge only the contiguous prefix actually processed. Changing participants
 requires an explicit handoff ID or resource selector for continuity.
 
+`tila_inspect` `changes` and `tila_journal_replay` accept `event_name` and `correlation_id` to find
+a project report by exact value, including reports older than the 90-day archive boundary. A
+filtered request examines a bounded range of the history and `limit` caps matches, so a page can
+be empty while `has_more` is true: keep following `next_after_seq` until `has_more` is false. Lost
+history still fails with `journal-history-unavailable` rather than returning an empty page. A
+filtered replay is a lookup; do not acknowledge its `next_after_seq`.
+
 Close accepts `{request:{handoff:{id,summary,based_on_seq,...},release:[{resource,fence}]}}`.
 The handoff UUID and body must remain identical on retries. Cleanup runs only after the handoff is
 saved, skips successor claims, and reports per-resource results. Retry failed cleanup with the
@@ -175,7 +182,7 @@ Artifact results expose provenance and review state; a matching hash does not es
 | Tool | Description |
 |------|-------------|
 | `tila_journal_list` | Query the project event journal |
-| `tila_journal_append` | Append a project-visible authenticated report; requires a stable idempotency key and never changes work state. Cloudflare only. |
+| `tila_journal_append` | Append a project-visible authenticated report; requires a stable idempotency key and never changes work state. `corrects_seq` appends a correction that only the original reporter or a project maintainer/owner may make (`report-correction-denied` otherwise). Cloudflare only. |
 | `tila_reentry` | Recover summary, journal changes, live claims, pending signals, and a relevant handoff |
 | `tila_journal_replay` | Replay oldest-first journal pages, including archived history |
 | `tila_journal_cursor_get` | Read the current participant's durable acknowledged cursor |

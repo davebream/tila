@@ -2206,6 +2206,11 @@ Existing JSONL archives remain readable. Missing identity fields are represented
 with the migration's `legacy-principal:<actor>` and `legacy-event:<seq>` markers;
 historical authenticated identity cannot be reconstructed. Legacy objects without
 range metadata require streaming scans, so replay of old history can be slower.
+Replay filtered by `event_name` or `correlation_id` examines up to 1000
+sequences per request and reads the archive once for that range. Archive
+objects have no name or correlation index, so each request streams every
+overlapping object in full; a project with very large archive objects pays that
+per request while following `has_more`. Use `through_seq` to bound such a search.
 A missing/corrupt archive produces `journal-history-unavailable`; conflicting
 versions of a sequence produce `journal-history-conflict`. Neither advances the
 saved cursor. Restore missing history from a verified backup before retrying;
@@ -3448,12 +3453,24 @@ directly; MCP returns it in structured output.
 | Lost response | Retry identical input with the same key within seven days; current authority must still be valid |
 | `idempotency-key-conflict` (422) | Inspect the original submission; do not change input under a previously used key |
 | `validation-error` (400), `payload-too-large` (413) | Correct the contract or move evidence to artifacts; no report was accepted |
+| `report-correction-denied` (403, `retryable: false`) | Only the report's original reporter or a project maintainer/owner may set `corrects_seq`; nothing was recorded. Send a new report without `corrects_seq`, or ask a maintainer to correct it. The same request will not succeed on retry |
+| `journal-history-unavailable` (503) on a correction | The history needed to establish the original reporter could not be read; nothing was recorded. Retry after archive access recovers. If it persists with `retryable: false` a link of the chain is damaged; a maintainer or owner can still correct the report |
 | `rate-limited` (429) | Wait for `Retry-After`, then retry with the same key |
 
 Limits are 60 new reports per principal per UTC minute and 300 per project per
 UTC minute, across credentials and participants. Identical accepted retries do
 not consume additional quota. Failed writes roll back their counters and receipt.
 Expired receipts/counters are cleaned on append and during the daily sweep.
+
+Correcting a report (`corrects_seq`) is limited to the original reporter's
+principal and to project maintainers and owners; the original reporter stays
+authoritative through a chain, so a maintainer's correction does not transfer
+authorship. The CLI/API token and a dashboard session are different principals:
+a person who reported with one cannot correct as the other unless their role is
+maintainer or owner. Corrections other participants recorded earlier remain in
+history; consumers that treat the latest correction as authoritative should read
+each correction's `principal_id`. A chain of more than 256 corrections can be
+extended only by a maintainer or owner.
 
 Authorization failures, missing participants, missing references, and stale
 claims/fences never append a report. The worker credential preset now includes
