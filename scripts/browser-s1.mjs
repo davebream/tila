@@ -6,7 +6,7 @@
 // External requests are blocked; only the known optional font stylesheet is nonfatal.
 // A failed run is evidence of the reported stop point, never S1 acceptance.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import {
@@ -16,9 +16,11 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createConnection, createServer } from "node:net";
 import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -31,6 +33,7 @@ import {
 } from "@tila/core";
 import { readDefinitionFile } from "@tila/core/definition-yaml";
 import { chromium } from "playwright";
+import { runS1Scale } from "./browser-s1-scale.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const workerDir = resolve(root, "packages/worker");
@@ -230,19 +233,74 @@ const onSignal = () => failRun(new Error("Interrupted; no retry permitted"));
 process.once("SIGTERM", onSignal);
 process.once("SIGINT", onSignal);
 try {
-  const source = await readFile(resolve(root, "scripts/browser-s1.mjs"));
-  await writeFile(resolve(evidence, "executed-browser-s1.mjs"), source, {
-    mode: 0o600,
-    flag: "wx",
-  });
-  record("executed source frozen", {
-    sha256: createHash("sha256").update(source).digest("hex"),
-  });
+  for (const path of [
+    "scripts/browser-s1.mjs",
+    "scripts/browser-s1-scale.mjs",
+    "packages/integration-tests/fixtures/s1-scale.ts",
+    "packages/integration-tests/runtime/task-scale-pages.test.ts",
+  ]) {
+    const source = await readFile(resolve(root, path));
+    await writeFile(
+      resolve(evidence, `executed-${path.split("/").at(-1)}`),
+      source,
+      {
+        mode: 0o600,
+        flag: "wx",
+      },
+    );
+    record("executed source frozen", {
+      path,
+      sha256: createHash("sha256").update(source).digest("hex"),
+    });
+  }
   await Promise.all(
     [env.HOME, env.XDG_CONFIG_HOME, env.TILA_HOME].map((path) =>
       mkdir(path, { mode: 0o700 }),
     ),
   );
+  const identities = {};
+  for (const path of [
+    "pnpm-lock.yaml",
+    "packages/ops-sqlite/src/migrations-sql.ts",
+    "packages/schemas/src/index.ts",
+  ])
+    identities[path] = createHash("sha256")
+      .update(await readFile(resolve(root, path)))
+      .digest("hex");
+  const toolVersion = (name, args) =>
+    execFileSync(name, args, {
+      cwd: root,
+      env,
+      encoding: "utf8",
+      timeout: 10_000,
+    }).trim();
+  const workerRequire = createRequire(
+    await realpath(resolve(workerDir, "node_modules/wrangler/package.json")),
+  );
+  record("candidate and toolchain provenance", {
+    commit: toolVersion("git", ["rev-parse", "HEAD"]),
+    dirty: toolVersion("git", ["status", "--porcelain"]),
+    node: process.version,
+    pnpm: toolVersion("pnpm", ["--version"]),
+    playwright: JSON.parse(
+      await readFile(
+        resolve(root, "node_modules/playwright/package.json"),
+        "utf8",
+      ),
+    ).version,
+    product: JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
+      .version,
+    wrangler: JSON.parse(
+      await readFile(
+        resolve(workerDir, "node_modules/wrangler/package.json"),
+        "utf8",
+      ),
+    ).version,
+    workerd: JSON.parse(
+      await readFile(workerRequire.resolve("workerd/package.json"), "utf8"),
+    ).version,
+    identities,
+  });
   // Vite and Wrangler must not discover unplanned per-checkout credential files.
   for (const dir of [
     root,
@@ -335,7 +393,7 @@ try {
   await writeFile(
     seed,
     `INSERT INTO _projects (project_id, display_name, created_at, created_by, cloudflare_account_id) VALUES ('${project}', 'Browser S1', strftime('%s','now'), 'browser-fixture', 'local');
-INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by) VALUES ('${createHash("sha256").update(token).digest("hex")}', '${project}', 'browser-competitor', 'full', strftime('%s','now'), 'browser-fixture');`,
+INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_by, token_id) VALUES ('${createHash("sha256").update(token).digest("hex")}', '${project}', 'browser-competitor', 'full', strftime('%s','now'), 'browser-fixture', '00000000-0000-4000-8000-000000000308');`,
     { mode: 0o600 },
   );
   await command("seed", [
@@ -395,7 +453,12 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
     ready(`${api}/api/runtime/info`, worker),
     ready(ui, vite),
   ]);
-  record("isolated local fixture", { migrations: migrations.length });
+  record("isolated local fixture", {
+    migrations: migrations.length,
+    d1_migrations_sha256: createHash("sha256")
+      .update(await readFile(migrationFile))
+      .digest("hex"),
+  });
   async function request(path, body) {
     const response = await fetch(`${api}${path}`, {
       method: body ? "POST" : "GET",
@@ -408,16 +471,37 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(10_000),
     });
-    const data = await response.json();
-    assert.equal(
-      response.ok,
-      true,
-      `fixture API ${path}: HTTP ${response.status}`,
+    const contentType = (response.headers.get("Content-Type") || "<missing>")
+      .split(";")[0]
+      .trim()
+      .toLowerCase()
+      .slice(0, 100);
+    const diagnostic = `fixture API ${path}: HTTP ${response.status}, Content-Type ${contentType}`;
+    assert.equal(response.ok, true, diagnostic);
+    assert.match(
+      contentType,
+      /^application\/(?:[\w.-]+\+)?json$/,
+      `${diagnostic}; expected JSON`,
     );
-    assert.equal(data.ok, true, "fixture API success envelope");
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(`${diagnostic}; invalid JSON`);
+    }
+    assert.equal(data.ok, true, `${diagnostic}; expected success envelope`);
     return data;
   }
   const schemaPath = `/projects/${project}/schema`;
+  const health = await request("/api/health");
+  const runtimeInfo = await request("/api/runtime/info");
+  record("local product and protocol identities", {
+    product: health.version,
+    commit: health.commit,
+    api_version: health.apiVersion,
+    protocol: runtimeInfo.protocol,
+    conversation_protocols: runtimeInfo.conversation_protocols,
+  });
   const current = () => request(schemaPath);
   const historyVersions = async () =>
     (await request(`${schemaPath}/history`)).entries.map(
@@ -516,8 +600,8 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       schemaPosts++;
   });
   const caseTimer = setTimeout(
-    () => failRun(new Error("Browser case exceeded 120 seconds")),
-    120_000,
+    () => failRun(new Error("Browser case exceeded 300 seconds")),
+    300_000,
   );
   const at = async (suffix = "") => {
     await page.waitForURL(`${base}${suffix}`);
@@ -1277,6 +1361,19 @@ retention_days = 30
         schema_posts: schemaPosts,
         projected_partial_sha256: sha256(partial),
       });
+      step = "301 task list and search pages";
+      await runS1Scale({
+        page,
+        request,
+        api,
+        ui,
+        project,
+        bounded,
+        record,
+        evidence,
+      });
+      assert.deepEqual(external, [], "browser attempted external access");
+      assert.deepEqual(errors, [], "browser page errors");
     })();
     await Promise.race([externalFailure, runFailure, scenario]);
   } finally {
@@ -1396,7 +1493,7 @@ retention_days = 30
     JSON.stringify(
       {
         scope:
-          "partial local browser S1: definitions, revision conflicts and changed stale partial import; no live/native/S2/S3 acceptance",
+          "partial local browser S1: definitions, revision conflicts, changed stale partial import and 301 task pages/search; no live/native/S2/S3 acceptance",
         observations,
         external,
         blocked_optional_fonts: blockedOptionalFonts,
