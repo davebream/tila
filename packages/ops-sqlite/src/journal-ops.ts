@@ -3,6 +3,7 @@ import type { TablesRelationalConfig } from "drizzle-orm";
 import {
   type SQL,
   and,
+  asc,
   count,
   desc,
   eq,
@@ -75,6 +76,13 @@ export function appendJournal(
 
 /**
  * List journal entries with optional filters.
+ *
+ * Ordering depends on whether a cursor is supplied:
+ * - Without `after_seq`, the newest `limit` entries are returned, newest first.
+ * - With `after_seq`, the next `limit` entries strictly after the cursor are
+ *   returned, oldest first, so a client advances the cursor to the last `seq`
+ *   it received and never skips an entry however large the burst. A page
+ *   shorter than `limit` means the client has caught up.
  *
  * When `watermark` is provided and `query.after_seq` is less than
  * `watermark.lastArchivedSeq`, the requested range has been archived to R2
@@ -154,11 +162,17 @@ export function listJournal(
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
+  // A cursor read walks forward from the cursor; a recent read takes the tail.
+  const order =
+    query.after_seq !== undefined
+      ? asc(schema.journal.seq)
+      : desc(schema.journal.seq);
+
   const rows = db
     .select()
     .from(schema.journal)
     .where(whereClause)
-    .orderBy(desc(schema.journal.seq))
+    .orderBy(order)
     .limit(query.limit ?? 100)
     .all();
 
