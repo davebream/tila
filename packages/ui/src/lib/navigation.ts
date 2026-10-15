@@ -4,9 +4,11 @@ import {
   PROJECT_ROLE_RANK,
   type ProjectRole,
   RESTRICTED_CREDENTIAL_SURFACES,
+  type RecordAccessSide,
   type SessionCapabilities,
   type WhoamiResponse,
   hasNamespaceRestrictions,
+  permitsAnyRecordSide,
 } from "@tila/schemas";
 
 // One navigation model for the header, the section sub-navigation and the
@@ -48,6 +50,12 @@ export interface AccessTarget {
   /** A page spanning independently readable sections needs at least one. */
   requiresAny?: readonly Capability[];
   surface?: string;
+  /**
+   * The side of the record namespace the page works on. A credential whose
+   * record rules admit nothing on that side has nothing to open there, so the
+   * item is hidden even when it holds the capability.
+   */
+  records?: RecordAccessSide;
   /**
    * Session flags from `/auth/session/status`; the item needs at least one.
    * Owner-level editors whose reads are owner-only use these.
@@ -118,6 +126,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         segment: "records",
         requires: ["records:read"],
         surface: "records",
+        records: "read",
       },
       {
         id: "artifacts",
@@ -385,7 +394,9 @@ export function navVisibility(
       item.requiresAny.some((cap) => capabilities.has(cap))) &&
     (!restricted ||
       item.surface === undefined ||
-      RESTRICTED_SURFACES.has(item.surface));
+      RESTRICTED_SURFACES.has(item.surface)) &&
+    (item.records === undefined ||
+      permitsAnyRecordSide(policy.restrictions, item.records));
 }
 
 /** Sections with at least one visible item, holding only those items. */
