@@ -92,6 +92,18 @@ function jsonExtractValue(value: unknown): string | number {
   return JSON.stringify(value);
 }
 
+/**
+ * Durable Object SQLite refuses a statement that binds more than 100 values.
+ * An id list sized by the page (tags, compact counts) is looked up in slices
+ * of this size, which leaves room for the other values a statement binds.
+ */
+const ID_LOOKUP_SLICE = 90;
+
+function* idSlices(ids: readonly string[]): Generator<string[]> {
+  for (let start = 0; start < ids.length; start += ID_LOOKUP_SLICE)
+    yield ids.slice(start, start + ID_LOOKUP_SLICE);
+}
+
 export type EnrichOpts = {
   db: BaseSQLiteDatabase<"sync", unknown, typeof schema>;
   parseSchemaToml: (
@@ -525,21 +537,21 @@ export function list(
     rowToEntity(row),
   );
 
-  // Batch tag enrichment: single IN query over all returned entities (no N+1)
+  // Batch tag enrichment: one IN query per slice of the page (no N+1)
   if (entities.length > 0) {
-    const ids = entities.map((e) => e.id);
-    const allTags = db
-      .select()
-      .from(schema.entityTags)
-      .where(inArray(schema.entityTags.entity_id, ids))
-      .all();
-
     // Build tag map: entity_id -> tags[]
     const tagMap = new Map<string, string[]>();
-    for (const t of allTags) {
-      const arr = tagMap.get(t.entity_id) ?? [];
-      arr.push(t.tag);
-      tagMap.set(t.entity_id, arr);
+    for (const ids of idSlices(entities.map((e) => e.id))) {
+      const sliceTags = db
+        .select()
+        .from(schema.entityTags)
+        .where(inArray(schema.entityTags.entity_id, ids))
+        .all();
+      for (const t of sliceTags) {
+        const arr = tagMap.get(t.entity_id) ?? [];
+        arr.push(t.tag);
+        tagMap.set(t.entity_id, arr);
+      }
     }
 
     for (const entity of entities) {
@@ -628,36 +640,39 @@ export function getCompactEntityStats(
   }
 
   const blockersByEntityId = new Map<string, number>();
-  const blockerRows = db
-    .select({
-      entity_id: schema.entityRelationships.to_id,
-      count: sql<number>`count(*)`,
-    })
-    .from(schema.entityRelationships)
-    .where(
-      and(
-        inArray(schema.entityRelationships.to_id, [...entityIds]),
-        inArray(schema.entityRelationships.type, ["blocks", "soft-blocks"]),
-      ),
-    )
-    .groupBy(schema.entityRelationships.to_id)
-    .all();
-  for (const row of blockerRows) {
-    blockersByEntityId.set(row.entity_id, row.count);
-  }
-
   const artifactsByEntityId = new Map<string, number>();
-  const artifactRows = db
-    .select({
-      entity_id: schema.entityArtifactReferences.entity_id,
-      count: sql<number>`count(*)`,
-    })
-    .from(schema.entityArtifactReferences)
-    .where(inArray(schema.entityArtifactReferences.entity_id, [...entityIds]))
-    .groupBy(schema.entityArtifactReferences.entity_id)
-    .all();
-  for (const row of artifactRows) {
-    artifactsByEntityId.set(row.entity_id, row.count);
+  // Each slice holds whole entities, so grouped counts never split a row.
+  for (const ids of idSlices([...new Set(entityIds)])) {
+    const blockerRows = db
+      .select({
+        entity_id: schema.entityRelationships.to_id,
+        count: sql<number>`count(*)`,
+      })
+      .from(schema.entityRelationships)
+      .where(
+        and(
+          inArray(schema.entityRelationships.to_id, ids),
+          inArray(schema.entityRelationships.type, ["blocks", "soft-blocks"]),
+        ),
+      )
+      .groupBy(schema.entityRelationships.to_id)
+      .all();
+    for (const row of blockerRows) {
+      blockersByEntityId.set(row.entity_id, row.count);
+    }
+
+    const artifactRows = db
+      .select({
+        entity_id: schema.entityArtifactReferences.entity_id,
+        count: sql<number>`count(*)`,
+      })
+      .from(schema.entityArtifactReferences)
+      .where(inArray(schema.entityArtifactReferences.entity_id, ids))
+      .groupBy(schema.entityArtifactReferences.entity_id)
+      .all();
+    for (const row of artifactRows) {
+      artifactsByEntityId.set(row.entity_id, row.count);
+    }
   }
 
   return { blockersByEntityId, artifactsByEntityId };
