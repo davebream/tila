@@ -17,7 +17,11 @@ import {
 } from "@/lib/operation-draft";
 import { rights } from "@/lib/rights";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { RecordCatalogDefinition, RecordItem } from "@tila/schemas";
+import {
+  type RecordCatalogDefinition,
+  type RecordItem,
+  isRecordWriteReceipt,
+} from "@tila/schemas";
 import { type FormEvent, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
@@ -81,6 +85,8 @@ export function RecordCreateDrawer() {
   // draft may start before the type definitions load).
   const fieldValues = { ...rawFields(fields, null), ...value.fields };
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The key of a record this credential wrote but may not open. */
+  const [unreadable, setUnreadable] = useState<string | null>(null);
   const close = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("create");
@@ -96,30 +102,43 @@ export function RecordCreateDrawer() {
       retry: boolean;
     }) => {
       const command = staged.command;
+      let receipt = false;
       try {
-        await createRecord(
-          project,
-          type,
-          {
-            key: command.key,
-            value: command.value,
-            ...(command.message ? { message: command.message } : {}),
-          },
-          staged.id,
+        // A credential that may write the key but not read it is answered
+        // with a receipt, never the record.
+        receipt = isRecordWriteReceipt(
+          await createRecord(
+            project,
+            type,
+            {
+              key: command.key,
+              value: command.value,
+              ...(command.message ? { message: command.message } : {}),
+            },
+            staged.id,
+          ),
         );
       } catch (error) {
         // Only a retry can meet its own earlier create (the response was
         // lost); then the same value means done. A first send that conflicts
-        // found someone else's record.
+        // found someone else's record. A credential that cannot read the key
+        // cannot compare, so the conflict stands.
         if (!retry || failureKind(error) !== "conflict") throw error;
+        if (!allowed.readRecord(type, command.key)) throw error;
         const existing = await getRecord(project, type, command.key);
         if (!sameJson(existing.record.value, command.value)) throw error;
       }
-      return command.key;
+      return { key: command.key, receipt };
     },
-    onSuccess: async (key) => {
+    onSuccess: async ({ key, receipt }) => {
       await invalidateRecords(client, project);
       discard();
+      // The detail page reads the record; do not send a credential that may
+      // only write it to a page that can only refuse.
+      if (receipt || !allowed.readRecord(type, key)) {
+        setUnreadable(key);
+        return;
+      }
       navigate(
         `/p/${project}/records/${type}/${key}?type=${encodeURIComponent(type)}`,
       );
@@ -159,11 +178,34 @@ export function RecordCreateDrawer() {
       <form className="space-y-4 p-6" onSubmit={onSubmit} noValidate>
         {!definition && types.data && (
           <FormNotice tone="info">
-            Type <code className="font-mono">{type}</code> is not declared by
-            the current schema, so new records cannot be created here.
+            {whoami.data && allowed.writeRecord(type) ? (
+              <>
+                This credential may write records of type{" "}
+                <code className="font-mono">{type}</code> but cannot see its
+                definition, so the form cannot be built here.
+              </>
+            ) : (
+              <>
+                Type <code className="font-mono">{type}</code> is not declared
+                by the current schema, so new records cannot be created here.
+              </>
+            )}
           </FormNotice>
         )}
-        {definition && (
+        {definition && whoami.data && !allowed.writeRecord(type) && (
+          <FormNotice tone="info">
+            This credential cannot write records of type{" "}
+            <code className="font-mono">{type}</code>.
+          </FormNotice>
+        )}
+        {unreadable !== null && (
+          <FormNotice tone="info">
+            Created <code className="font-mono">{`${type}/${unreadable}`}</code>
+            . This credential may write it but not read it, so it is not shown
+            here.
+          </FormNotice>
+        )}
+        {definition && unreadable === null && (
           <>
             <TextField
               label="Key"
@@ -208,25 +250,33 @@ export function RecordCreateDrawer() {
           </>
         )}
         <RecordFailure kind={kind} error={submit.error} creating />
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => {
-              discard();
-              close();
-            }}
-          >
-            Discard
-          </Button>
-          <Button
-            type="submit"
-            disabled={busy || !definition || !allowed.writeRecord(type)}
-          >
-            {busy ? "Creating…" : draft.pending ? "Retry" : "Create record"}
-          </Button>
-        </div>
+        {unreadable !== null ? (
+          <div className="flex justify-end gap-2">
+            <Button type="button" onClick={close}>
+              Done
+            </Button>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                discard();
+                close();
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              type="submit"
+              disabled={busy || !definition || !allowed.writeRecord(type)}
+            >
+              {busy ? "Creating…" : draft.pending ? "Retry" : "Create record"}
+            </Button>
+          </div>
+        )}
       </form>
     </Drawer>
   );
