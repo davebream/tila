@@ -99,6 +99,33 @@ function operationVariant(
   }
 }
 
+/**
+ * Who authored a revision. Both identifiers are independent and nullable: a
+ * revision written before principal tracking has a token but no principal, and
+ * a browser or OIDC session write has a principal but no token.
+ */
+function RevisionAuthor({
+  principalId,
+  tokenId,
+}: {
+  principalId?: string | null;
+  tokenId?: string | null;
+}) {
+  if (!principalId && !tokenId) {
+    return (
+      <span className="text-muted-foreground" title="Not recorded">
+        —
+      </span>
+    );
+  }
+  return (
+    <div className="space-y-0.5">
+      {principalId && <div>{principalId}</div>}
+      {tokenId && <div className="text-muted-foreground">token {tokenId}</div>}
+    </div>
+  );
+}
+
 export function RecordDetailPage() {
   useTimeTick();
   const params = useParams();
@@ -554,6 +581,7 @@ export function RecordDetailPage() {
                         <TableHead>Revision</TableHead>
                         <TableHead>Operation</TableHead>
                         <TableHead>Actor</TableHead>
+                        <TableHead>Principal</TableHead>
                         <TableHead>Time</TableHead>
                         <TableHead>Message</TableHead>
                       </TableRow>
@@ -571,6 +599,12 @@ export function RecordDetailPage() {
                           </TableCell>
                           <TableCell className="font-mono text-xs">
                             {item.actor}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            <RevisionAuthor
+                              principalId={item.principal_id}
+                              tokenId={item.token_id}
+                            />
                           </TableCell>
                           <TableCell
                             className="text-muted-foreground"
