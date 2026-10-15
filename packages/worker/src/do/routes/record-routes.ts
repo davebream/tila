@@ -15,6 +15,7 @@ import {
   RECORD_LIST_SORTS,
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
+  RecordGetQuerySchema,
   RecordPatchRequestSchema,
   RecordPutRequestSchema,
   RecordSetRequestSchema,
@@ -632,6 +633,26 @@ export function createRecordRoutes(deps: RouterDeps): ProjectSubRouter {
 
   app.get("/record/:type/:key{.+}", (c) => {
     const { type, key } = c.req.param();
+    // The credential check ran in the router middleware on this same GET
+    // path, so a metadata read needs exactly the read side of the key. A
+    // `meta` other than `1` throws a ZodError, answered as a 400.
+    const query = RecordGetQuerySchema.parse({
+      meta: c.req.queries("meta"),
+    });
+
+    if (query.meta) {
+      const meta = recordOps.getRecordMeta(deps.db, type, key);
+      if (!meta) {
+        return jsonError(
+          c,
+          404,
+          "not-found",
+          `Record ${type}/${key} not found`,
+        );
+      }
+      return c.json({ ok: true, meta });
+    }
+
     const result = recordOps.getRecord(deps.db, type, key);
 
     if (!result) {

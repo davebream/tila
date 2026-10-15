@@ -1092,7 +1092,7 @@ POST   /projects/:id/records/:type
 GET    /projects/:id/records/:type/~/history/:key{.+}
 POST   /projects/:id/records/:type/~/archive/:key{.+}
 POST   /projects/:id/records/:type/~/unarchive/:key{.+}
-GET    /projects/:id/records/:type/:key{.+}
+GET    /projects/:id/records/:type/:key{.+}          (?meta=1: metadata only)
 PUT    /projects/:id/records/:type/:key{.+}
 PATCH  /projects/:id/records/:type/:key{.+}
 ```
@@ -1338,6 +1338,58 @@ fence is top-level so callers can read and then perform a fenced mutation.
   "fence": 4
 }
 ```
+
+### Metadata Read
+
+```http
+GET /projects/:id/records/:type/:key{.+}?meta=1
+```
+
+Returns the revision, current fence, value hash, update time and archived state
+of one record without its value. It is the same route and the same read access
+as `get`, with an additive query parameter; a request without `meta` returns
+the response above, unchanged.
+
+```json
+{
+  "ok": true,
+  "meta": {
+    "type": "service",
+    "key": "api",
+    "revision": 4,
+    "fence": 4,
+    "value_sha256": "abc123...",
+    "updated_at": 1779090100000,
+    "archived": 0
+  }
+}
+```
+
+- All five state fields are read in one SQLite snapshot, so `fence` is the
+  fence of the `revision` beside it, never the fence of a later write. A fenced
+  write that carries this `fence` is accepted unless another write has landed
+  since; then it is rejected as stale, as for any fence.
+- `value`, `tags`, `schema_version`, `created_at` and `updated_by` are not
+  returned, and legacy-default enrichment is not applied. `value_sha256` is the
+  hash of the stored canonical value, so equal hashes mean equal stored values.
+  A record with no fence row reports `fence: 0`, as `get` does.
+- `meta` accepts only the literal `1`. `true`, `0`, an empty value or a repeated
+  parameter answer `400 validation-error`. Credentials are checked first, so a
+  denied caller gets the same `403` as for `get` whatever `meta` holds.
+- Authorization is the read side of the key, exactly as for `get`: a credential
+  that may only write the key, or whose read rules do not admit it, gets the
+  same `403 permission-denied` as for `get`, whether or not the record exists.
+  A missing record is the same `404 not-found` as for `get`.
+- The response is sent `Cache-Control: private, no-store`, and the Worker's
+  cache layer never serves or stores it, so a stale revision or fence cannot
+  come from a cache. There is no `ETag`, conditional request or `304` form.
+- Keys with slashes are encoded per segment, as for `get`.
+
+SDK: `records.meta(type, key)` returns `RecordMetaResponse`
+(`{ ok: true, meta: RecordMeta }`). The embedded backend behind
+`tila-sdk/local` exposes the same method; there it throws `Record not found:
+<type>/<key>` for a missing record, as `records.get` does. The CLI's
+`RecordBackend` seam is unchanged.
 
 ### Response Shape
 

@@ -149,6 +149,14 @@ export function namespacedRecordMethods(
       return stripRecordType(await inner.get(applyPrefix(ns, type), key));
     },
 
+    async meta(type: string, key: string) {
+      const result = await inner.meta(applyPrefix(ns, type), key);
+      return {
+        ...result,
+        meta: { ...result.meta, type: stripPrefix(ns, result.meta.type) },
+      };
+    },
+
     async patch(
       type: string,
       key: string,

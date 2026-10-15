@@ -4,6 +4,7 @@ import {
   ListCursorSchema,
   RecordArchiveRequestSchema,
   RecordCreateRequestSchema,
+  RecordGetQuerySchema,
   RecordListQuerySchema,
   RecordPatchRequestSchema,
   RecordPutRequestSchema,
@@ -403,15 +404,23 @@ records.post("/:type/~/put/:key{.+}", requirePermission("write"), async (c) => {
 });
 
 // GET /records/:type/:key -> DO GET /record/:type/:key
+// `?meta=1` asks the same route for revision, fence, value hash, update time
+// and archived state without the value. It stays a GET on the same path, so
+// the capability and namespace checks above treat it as exactly the read side
+// of the key. Only the literal `1` is accepted; everything else is a 400.
 records.get("/:type/:key{.+}", async (c) => {
   const { type, key } = c.req.param();
   const stub = c.get("doStub");
+  const parsed = RecordGetQuerySchema.safeParse({
+    meta: c.req.queries("meta"),
+  });
+  if (!parsed.success) return zodValidationError(c, parsed.error);
   return forwardToDO(
     stub,
     `/record/${type}/${key}`,
     "GET",
     undefined,
-    undefined,
+    parsed.data.meta ? { meta: "1" } : undefined,
     analyticsCtxFrom(c),
   );
 });

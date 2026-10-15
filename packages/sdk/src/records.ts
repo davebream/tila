@@ -4,6 +4,7 @@ import type {
   RecordGetResponse,
   RecordHistoryResponse,
   RecordListResponse,
+  RecordMetaResponse,
   RecordMutateResponse,
   RecordPatchRequest,
   RecordPutRequest,
@@ -60,6 +61,21 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
 
     async get(type: string, key: string): Promise<RecordGetResponse> {
       return client.get<RecordGetResponse>(`${base}/${type}/${encodeKey(key)}`);
+    },
+
+    /**
+     * Reads a record's revision, current fence, `value_sha256`, `updated_at`
+     * and `archived` state without its value (`GET ...?meta=1`). All fields come
+     * from one snapshot, so the fence belongs to the revision beside it. Needs
+     * the same read access to the key as `get`, and a missing record is the
+     * same 404. Use it to check whether a cached copy is current or to learn the
+     * fence before a fenced write without transferring the value.
+     */
+    async meta(type: string, key: string): Promise<RecordMetaResponse> {
+      return client.get<RecordMetaResponse>(
+        `${base}/${type}/${encodeKey(key)}`,
+        { query: { meta: "1" } },
+      );
     },
 
     async patch(
