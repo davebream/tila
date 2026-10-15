@@ -88,7 +88,7 @@ export function registerWorkflowTools(
   );
   register(
     "tila_inspect",
-    "Read ready work, task/record/artifact/handoff details, participants, search, or journal changes. No writes or acknowledgments. Continue changes with next_after_seq and unchanged through_seq. Read a record before setting it to obtain its fence.",
+    "Read ready work, task/record/artifact/handoff details, participants, search, or journal changes. No writes or acknowledgments. Continue changes with next_after_seq and unchanged through_seq until has_more is false. changes accepts event_name/correlation_id to find project reports in live or archived history; such a page may be empty while has_more is true, and it is a lookup, not a stream to acknowledge. Read a record before setting it to obtain its fence.",
     InspectRequestSchema,
     async (input) => {
       switch (input.action) {

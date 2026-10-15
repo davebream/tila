@@ -6,10 +6,14 @@ import {
   CreateEntityRequestSchema,
   DeleteEntityRelationshipRequestSchema,
   ListEntityRelationshipsRequestSchema,
+  MAX_TASK_DATA_BYTES,
   TaskListQuerySchema,
   type TypeCount,
   UpdateEntityRequestSchema,
+  errorEnvelope,
   parseTagFilter,
+  taskDataBytes,
+  taskDataTooLargeMessage,
 } from "@tila/schemas";
 import { Hono } from "hono";
 import { ZodError } from "zod";
@@ -36,6 +40,14 @@ entities.post("/", requirePermission("write"), async (c) => {
   const raw = await c.req.json();
   const parsed = CreateEntityRequestSchema.safeParse(raw);
   if (!parsed.success) return zodValidationError(c, parsed.error);
+  // Refuse before the Durable Object hop. The DO re-checks every write, and an
+  // update's merged size can only be known there.
+  const bytes = taskDataBytes(parsed.data.data);
+  if (bytes > MAX_TASK_DATA_BYTES)
+    return c.json(
+      errorEnvelope("payload-too-large", taskDataTooLargeMessage(bytes), false),
+      413,
+    );
   const stub = c.get("doStub");
   const tokenResult = c.get("tokenResult");
   return forwardToDO(

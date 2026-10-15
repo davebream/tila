@@ -114,7 +114,11 @@ export type {
 export { entitySearchText } from "./entity-search-text";
 
 // Error classes (re-exported for consumer use)
-export { EntityAlreadyExistsError, EntityNotFoundError } from "./entity-ops";
+export {
+  EntityAlreadyExistsError,
+  EntityNotFoundError,
+  TaskDataTooLargeError,
+} from "./entity-ops";
 export { SearchQueryError, validateFtsQuery } from "./artifact-ops";
 export {
   ClaimOwnershipError,

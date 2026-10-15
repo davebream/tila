@@ -2255,6 +2255,11 @@ Existing JSONL archives remain readable. Missing identity fields are represented
 with the migration's `legacy-principal:<actor>` and `legacy-event:<seq>` markers;
 historical authenticated identity cannot be reconstructed. Legacy objects without
 range metadata require streaming scans, so replay of old history can be slower.
+Replay filtered by `event_name` or `correlation_id` examines up to 1000
+sequences per request and reads the archive once for that range. Archive
+objects have no name or correlation index, so each request streams every
+overlapping object in full; a project with very large archive objects pays that
+per request while following `has_more`. Use `through_seq` to bound such a search.
 A missing/corrupt archive produces `journal-history-unavailable`; conflicting
 versions of a sequence produce `journal-history-conflict`. Neither advances the
 saved cursor. Restore missing history from a verified backup before retrying;

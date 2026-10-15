@@ -32,6 +32,42 @@ describe("HTTP continuity facade", () => {
     await expect(journal.acknowledge({ seq: -1 })).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+  it("sends replay filters as query parameters and omits absent ones", async () => {
+    const page = {
+      ok: true,
+      events: [],
+      next_after_seq: 1000,
+      through_seq: 2500,
+      has_more: true,
+    };
+    const fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(Response.json(page)));
+    vi.stubGlobal("fetch", fetch);
+    const journal = createJournalContinuityMethods(
+      new TilaClient({ baseUrl: "https://tila.test", token: "token" }),
+      "project",
+    );
+    // An empty page with has_more is progress, not the end of history.
+    expect(
+      await journal.replay({
+        after_seq: 0,
+        event_name: "pipeline.tests_passed",
+        correlation_id: "run-123",
+      }),
+    ).toMatchObject({ events: [], next_after_seq: 1000, has_more: true });
+    const filtered = new URL(fetch.mock.calls[0][0]).searchParams;
+    expect(filtered.get("event_name")).toBe("pipeline.tests_passed");
+    expect(filtered.get("correlation_id")).toBe("run-123");
+    await journal.replay({ after_seq: 0 });
+    const plain = new URL(fetch.mock.calls[1][0]).searchParams;
+    expect(plain.has("event_name")).toBe(false);
+    expect(plain.has("correlation_id")).toBe(false);
+    await expect(
+      journal.replay({ after_seq: 0, event_name: "Not A Name" }),
+    ).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it.each([undefined, "shutdown", "work"] as const)(
     "preserves kind %s and stable handoff retry bodies",
     async (kind) => {

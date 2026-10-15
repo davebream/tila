@@ -1,14 +1,34 @@
 import { z } from "zod";
 import { JournalResponseSchema, SummaryResponseSchema } from "./api";
 import { ClaimSchema } from "./claim";
+import {
+  CustomEventNameSchema,
+  JournalCorrelationIdSchema,
+} from "./custom-journal";
 import { IdentityContextSchema } from "./identity";
 import { SignalSchema } from "./signal";
 
 export const JournalSequenceSchema = z.number().int().nonnegative().safe();
-export const JournalReplayRequestSchema = z.object({
+/**
+ * Sequences one filtered replay request may examine, however few events match.
+ * A whole number of maximum (200-event) pages, so clients page the whole
+ * history by following `next_after_seq` while `has_more` is true.
+ */
+export const JOURNAL_REPLAY_SCAN_BUDGET = 1000;
+const JournalReplayWindowSchema = z.object({
   after_seq: JournalSequenceSchema,
   through_seq: JournalSequenceSchema.optional(),
   limit: z.number().int().min(1).max(200).default(100),
+});
+/**
+ * `event_name` and `correlation_id` select project reports (`custom.reported`)
+ * by exact value after the examined range's history is verified complete. With
+ * either filter `limit` caps returned matches, not examined sequences, and a
+ * page may be empty while `has_more` is true.
+ */
+export const JournalReplayRequestSchema = JournalReplayWindowSchema.extend({
+  event_name: CustomEventNameSchema.optional(),
+  correlation_id: JournalCorrelationIdSchema.optional(),
 });
 export type JournalReplayRequest = z.input<typeof JournalReplayRequestSchema>;
 // Replay includes archived history and never reports the list's watermark.
@@ -80,7 +100,8 @@ export const HandoffListResponseSchema = z.object({
   next_before_seq: JournalSequenceSchema.nullable(),
 });
 export type HandoffListResponse = z.infer<typeof HandoffListResponseSchema>;
-export const ReentryRequestSchema = JournalReplayRequestSchema.partial()
+// Re-entry recovers context in order: it never takes replay filters.
+export const ReentryRequestSchema = JournalReplayWindowSchema.partial()
   .extend({
     handoff_id: z.string().uuid().optional(),
     resource: ReferenceId.optional(),

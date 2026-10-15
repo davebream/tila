@@ -1,5 +1,6 @@
 /** Source-only checks of the prospective method draft; never launches or scores subjects. */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
@@ -30,6 +31,45 @@ const paths = draftPaths(2);
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 const readJson = (path) => JSON.parse(read(path));
 const hash = (value) => sha256Text(canonicalJson(value));
+
+// Declared provider identities describe source at this commit. Working-tree copies
+// evolve with the product, so history is read from the pinned commit, never from disk.
+const PROVIDER_REFERENCE_COMMIT = "5a3cd6463eab41cb5bc0307f89839af280c3412b";
+try {
+  execFileSync(
+    "git",
+    ["cat-file", "-e", `${PROVIDER_REFERENCE_COMMIT}^{commit}`],
+    { cwd: root, stdio: "ignore" },
+  );
+} catch (error) {
+  throw new Error(
+    `provider reference commit ${PROVIDER_REFERENCE_COMMIT} is unavailable; fetch full git history`,
+    { cause: error },
+  );
+}
+const referenceBlobs = new Map();
+function referenceBlob(path) {
+  if (!referenceBlobs.has(path)) {
+    let blob = null;
+    try {
+      blob = execFileSync(
+        "git",
+        ["cat-file", "blob", `${PROVIDER_REFERENCE_COMMIT}:${path}`],
+        { cwd: root, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 24 },
+      );
+    } catch {
+      blob = null;
+    }
+    referenceBlobs.set(path, blob);
+  }
+  return referenceBlobs.get(path);
+}
+const readReference = (path) => referenceBlob(path)?.toString("utf8");
+const referenceSha256 = (path) => {
+  const blob = referenceBlob(path);
+  return blob ? sha256Text(blob) : null;
+};
+
 const old = readJson("docs/evidence/issue-194-rubric-v3.json");
 const scenarios = allScenarios();
 const warmup = warmupScenario();
@@ -153,6 +193,7 @@ function fixtureComponents() {
 
 // These trusted source expressions run with fabricated values only. No SDK/database,
 // subject, native tool, runtime hook or installed service is invoked or validated.
+// They are parsed from the pinned reference commit, the bytes whose hashes validate checks.
 function sourceNodes(path, predicate, parent) {
   const nodes = [];
   function visit(node) {
@@ -161,7 +202,12 @@ function sourceNodes(path, predicate, parent) {
   }
   visit(
     parent ??
-      ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true),
+      ts.createSourceFile(
+        path,
+        readReference(path),
+        ts.ScriptTarget.Latest,
+        true,
+      ),
   );
   return nodes;
 }
@@ -328,7 +374,7 @@ function validate(draft, revision = 2) {
       equal(
         `renewal source identity ${path}`,
         d.provider_reference_source.files[path],
-        sha256Text(read(path)),
+        referenceSha256(path),
       );
     equal(
       "renewal serialized shape",
@@ -375,12 +421,12 @@ function validate(draft, revision = 2) {
   equal(
     "provider reference commit",
     d.provider_reference_source.reference_commit,
-    "5a3cd6463eab41cb5bc0307f89839af280c3412b",
+    PROVIDER_REFERENCE_COMMIT,
   );
   for (const [path, expectedHash] of Object.entries(
     d.provider_reference_source.files,
   )) {
-    equal(`provider reference ${path}`, sha256Text(read(path)), expectedHash);
+    equal(`provider reference ${path}`, referenceSha256(path), expectedHash);
   }
   const regenerated = buildDeclaration({
     rubric: r,
@@ -788,5 +834,26 @@ test("revision 2 preserves revision 1 rubric and comparator semantics with only 
     );
     if (key === "rubric") normalized.draft_revision = 1;
     assert.deepEqual(normalized, retained[key], key);
+  }
+});
+
+test("v4 validation rejects a wrong historical provider source hash even when rehashed", () => {
+  const { files } = loadDraft().declaration.provider_reference_source;
+  for (const path of Object.keys(files)) {
+    const draft = loadDraft();
+    draft.declaration.provider_reference_source.files[path] = sha256Text(
+      `${readReference(path)}\n// edited after the reference commit\n`,
+    );
+    rebind(draft);
+    assert.ok(validate(draft).includes(`provider reference ${path}`), path);
+  }
+});
+
+test("v4 validation flags a repointed reference commit without trusting other bytes", () => {
+  for (const commit of ["0".repeat(40), "HEAD"]) {
+    const draft = loadDraft();
+    draft.declaration.provider_reference_source.reference_commit = commit;
+    rebind(draft);
+    assert.deepEqual(validate(draft), ["provider reference commit"], commit);
   }
 });

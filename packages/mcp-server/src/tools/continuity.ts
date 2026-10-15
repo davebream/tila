@@ -35,7 +35,7 @@ export function registerContinuityTools(
   registerPrimitiveTool(
     server,
     "tila_journal_replay",
-    "Replay journal events oldest first, including archives. Continue using next_after_seq and the same through_seq.",
+    "Replay journal events oldest first, including archives. Continue using next_after_seq and the same through_seq until has_more is false. Optional event_name and correlation_id find project reports by exact value in live or archived history: each request examines a bounded range and limit caps matches, so a page may be empty while has_more is true. Missing history still fails with journal-history-unavailable. A filtered replay is a lookup, not a consumer stream: never acknowledge its next_after_seq.",
     JournalReplayRequestSchema.shape,
     (input) => result(() => facade.journal.replay(input)),
   );
