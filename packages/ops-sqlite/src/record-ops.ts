@@ -4,6 +4,7 @@ import {
   type RecordDefinition,
   type RecordHistoryItem,
   type RecordListItem,
+  type RecordMeta,
   type RecordRow,
   type RecordSearchResult,
   type TypeCount,
@@ -94,7 +95,7 @@ export class RevisionNotFoundError extends Error {
 // `RecordRow`, `RecordListItem`, and `RecordHistoryItem` are now defined
 // canonically in `@tila/schemas` (see `RecordRowSchema` etc.) and re-exported
 // here for backward compatibility with existing consumers of this module.
-export type { RecordRow, RecordListItem, RecordHistoryItem };
+export type { RecordRow, RecordListItem, RecordHistoryItem, RecordMeta };
 
 // ---------------------------------------------------------------------------
 // FTS5 text extraction helper
@@ -954,6 +955,59 @@ export function getRecord(
     updated_by: row.updated_by,
     tags,
     fence,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// getRecordMeta — metadata-only read, one statement
+// ---------------------------------------------------------------------------
+
+/**
+ * Revision, fence, value hash, update time and archived state of one record,
+ * without its value, tags or any other column.
+ *
+ * The record row and its fence are read by a single statement (a left join on
+ * the record's fence resource), so every field comes from one SQLite snapshot
+ * even when another connection writes between two reads; `getRecord` issues
+ * separate queries and has no such guarantee. `value_json` is never selected,
+ * so the value is neither loaded nor parsed.
+ *
+ * A record with no fence row reports fence `0`, exactly as `getRecord` does,
+ * so the two reads agree on every field they share. Returns `null` when the
+ * record does not exist.
+ */
+export function getRecordMeta(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  type: string,
+  key: string,
+): RecordMeta | null {
+  const row = db
+    .select({
+      type: schema.records.type,
+      key: schema.records.key,
+      revision: schema.records.revision,
+      value_sha256: schema.records.value_sha256,
+      updated_at: schema.records.updated_at,
+      archived: schema.records.archived,
+      fence: schema.fences.current_fence,
+    })
+    .from(schema.records)
+    .leftJoin(
+      schema.fences,
+      eq(schema.fences.resource, formatRecordResource(type, key)),
+    )
+    .where(and(eq(schema.records.type, type), eq(schema.records.key, key)))
+    .get();
+
+  if (!row) return null;
+  return {
+    type: row.type,
+    key: row.key,
+    revision: row.revision,
+    fence: row.fence ?? 0,
+    value_sha256: row.value_sha256,
+    updated_at: row.updated_at,
+    archived: row.archived,
   };
 }
 

@@ -1786,6 +1786,56 @@ export const RecordGetResponseSchema = z.object({
 
 export type RecordGetResponse = z.infer<typeof RecordGetResponseSchema>;
 
+/**
+ * Query of `GET /records/:type/:key`. The only parameter is `meta`, and the
+ * only value it accepts is the literal `1`: any other value (`true`, `0`,
+ * `yes`, empty, repeated) is a validation error rather than a truthy guess.
+ * Absent means the ordinary full read, whose response is unchanged.
+ *
+ * Parse the list of values the router holds for `meta` (`c.req.queries`), not
+ * a single value: a repeated `meta=1&meta=1` must fail instead of the second
+ * value being dropped. Parsed, `meta` is `true` or absent.
+ */
+export const RecordGetQuerySchema = z.object({
+  meta: z
+    .tuple([z.literal("1")])
+    .transform((): true => true)
+    .optional(),
+});
+
+export type RecordGetQuery = z.infer<typeof RecordGetQuerySchema>;
+
+/**
+ * Metadata-only view of one record: what a caller needs to decide whether its
+ * copy is current, and the fence a later fenced write must carry, without
+ * transferring or parsing the value. Every field is read in one SQLite
+ * snapshot, so `revision`, `value_sha256`, `updated_at`, `archived` and
+ * `fence` always describe the same moment.
+ *
+ * Deliberately absent: `value`, `tags`, `schema_version`, `created_at`,
+ * `updated_by`, and legacy-default enrichment. `fence` is `0` for a record
+ * with no fence row, exactly as in the ordinary read.
+ */
+export const RecordMetaSchema = z.object({
+  type: RecordTypeSchema,
+  key: RecordKeySchema,
+  revision: z.number().int(),
+  fence: z.number().int(),
+  value_sha256: z.string(),
+  updated_at: z.number().int(),
+  archived: z.number().int(),
+});
+
+export type RecordMeta = z.infer<typeof RecordMetaSchema>;
+
+/** Response of `GET /records/:type/:key?meta=1`. */
+export const RecordMetaResponseSchema = z.object({
+  ok: z.literal(true),
+  meta: RecordMetaSchema,
+});
+
+export type RecordMetaResponse = z.infer<typeof RecordMetaResponseSchema>;
+
 export const RecordMutateResponseSchema = z.object({
   ok: z.literal(true),
   record: RecordItemSchema,

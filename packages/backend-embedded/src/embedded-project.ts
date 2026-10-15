@@ -100,6 +100,7 @@ import {
   type Presence,
   type RecordHistoryItem,
   type RecordListItem,
+  type RecordMeta,
   type RecordRow,
   TaskListPageOptionsSchema,
 } from "@tila/schemas";
@@ -1092,6 +1093,17 @@ export class EmbeddedProject
       : result.value;
 
     return { ...result, value: enrichedValue };
+  }
+
+  /**
+   * Metadata-only read behind the SDK's `records.meta`: revision, fence, value
+   * hash, update time and archived state from one SQLite snapshot, with no
+   * value, tags or legacy-default enrichment (DO parity: the `?meta=1` branch of
+   * `GET /record/:type/:key`). It is not on the `RecordBackend` seam: the CLI's
+   * local and remote backends do not need it.
+   */
+  async getRecordMeta(type: string, key: string): Promise<RecordMeta | null> {
+    return recordOps.getRecordMeta(this.db, type, key);
   }
 
   async patchRecord(input: PatchRecordInput): Promise<RecordRow> {
