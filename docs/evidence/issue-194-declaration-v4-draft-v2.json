@@ -1,0 +1,382 @@
+{
+  "schema": "tila.dogfood.method-declaration/4-draft-2",
+  "kind": "prospective_method_draft",
+  "issue": 194,
+  "method_version": 4,
+  "draft_revision": 2,
+  "status": "DRAFT; independent exact-head method review only; execution HOLD; no acceptance, smoke receipt or execution freeze",
+  "history": "Earlier v2 activity and guard observations informed this prospective draft. The dated public erratum found no retained v3 scored bundle in a bounded inventory, not proof of no observation. Preserve v1-v3 and NO-GO evidence; never pool/reuse/rescore versions.",
+  "artifacts": {
+    "protocol": {
+      "path": "docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v2.md",
+      "sha256": "827c2977727f7facd22215baac3d30f44e30e8f932df09f14df8896a514f3897"
+    },
+    "rubric": {
+      "path": "docs/evidence/issue-194-rubric-v4-draft-v2.json",
+      "sha256": "e1743a8e226f3bf5f29e224dc057871227bec290d263cf10d7f187f87f672780"
+    },
+    "inventory": {
+      "path": "docs/evidence/issue-194-service-inventory-v4-draft-v2.json",
+      "sha256": "989a7e41c51b417a6593b9386697bc8187bdd641683c970ee4fc24af76e98d7a"
+    },
+    "comparator": {
+      "path": "docs/evidence/issue-194-comparator-v4-draft-v2.json",
+      "sha256": "f02879c162507e893a12e8018da07746325fe82644fff69a076acd8c29dcd4bc"
+    }
+  },
+  "preserved_history": {
+    "issue-194-rubric-v1.json": "819ae6483ccb60c1359ba55a642d73d6398adfcca4420ada626cdc13a49243d7",
+    "issue-194-rubric-v2.json": "d0bef5d5003856ba8c2b7998df0b31adb2623f1ad6b53c30b655632f40443956",
+    "issue-194-rubric-v3.json": "d9706a022131a5cb919c741a5e550f5f958332dc49af2f20d8a97a723702612f",
+    "issue-194-manifest-v3.json": "267802195cf1ffd4fbe7ef588f4cd85cff1245aca494f20399b86f30afcbf975",
+    "issue-194-method-erratum-v1.md": "0200909552c751545a6c940f86434b2e2860d69f582b14fd89f64bcb06965343"
+  },
+  "fixture_source": {
+    "path": "scripts/dogfood-study-fixtures.mjs",
+    "sha256": "8be84c53a99ddb4f16e7e6fe158111385b767133bc886ed49fe6c323be980696"
+  },
+  "scenarios": {
+    "p1-x": {
+      "sha256": "8105ceb8cd22553fa049b87d01d27d7914f228f5611c159cb46443eca354903e",
+      "cases": 15,
+      "decision_cases": 9,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/detail.mjs",
+        "src/index.mjs",
+        "src/ledger.mjs",
+        "src/money.mjs",
+        "src/summary.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p1-y": {
+      "sha256": "771c46111989374a1a338befc0048b247ce8c08f726d7219e32f3cbc341d470e",
+      "cases": 15,
+      "decision_cases": 9,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/cost.mjs",
+        "src/index.mjs",
+        "src/lineitem.mjs",
+        "src/rollup.mjs",
+        "src/spend.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p2-x": {
+      "sha256": "4af07155cd0001212224ffa469bb2e7672d23ed3fbd53c0aba1fbf8e91b48b9b",
+      "cases": 16,
+      "decision_cases": 3,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/cmd-export.mjs",
+        "src/cmd-list.mjs",
+        "src/flags.mjs",
+        "src/index.mjs",
+        "src/store.mjs",
+        "test/smoke.test.mjs"
+      ]
+    },
+    "p2-y": {
+      "sha256": "78145303fb5a5083ff362b5e9bf97df9fd6777ef33d0c755f95d23fd73755b1c",
+      "cases": 16,
+      "decision_cases": 3,
+      "files": [
+        "NOTES.md",
+        "package.json",
+        "src/args.mjs",
+        "src/cmd-dump.mjs",
+        "src/cmd-find.mjs",
+        "src/index.mjs",
+        "src/shelf.mjs",
+        "test/smoke.test.mjs"
+      ]
+    }
+  },
+  "warmup": {
+    "scenario": "warmup-w",
+    "sha256": "cc766adf0d734c155939273430d8516c76c26a1bc9874b1290cd232ffccf8584"
+  },
+  "allocation": {
+    "seed": "tila-194-pilot-v1",
+    "rule": "for each pair p: h = sha256(seed + '|' + p); if (h[0] & 1) == 0 then variant x runs under A and y under B, else y under A and x under B",
+    "pairs": {
+      "p1": {
+        "A": "x",
+        "B": "y",
+        "digest": "26f6ab57cf5d609cc88feac456087c3476d454ebd5229a33a1e7da470c516c2a"
+      },
+      "p2": {
+        "A": "y",
+        "B": "x",
+        "digest": "89cb8f0af51cf19cafbf1b076b88b703d0cd3938e3e3b74db03c8acb480c7968"
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": "t1",
+      "order": 1,
+      "pair": "p1",
+      "condition": "A",
+      "variant": "x",
+      "scenario": "p1-x",
+      "scenario_sha256": "8105ceb8cd22553fa049b87d01d27d7914f228f5611c159cb46443eca354903e",
+      "replaced_role": "w2",
+      "role_items": {
+        "w1": "item1",
+        "w2": "item2"
+      }
+    },
+    {
+      "trial": "t2",
+      "order": 2,
+      "pair": "p1",
+      "condition": "B",
+      "variant": "y",
+      "scenario": "p1-y",
+      "scenario_sha256": "771c46111989374a1a338befc0048b247ce8c08f726d7219e32f3cbc341d470e",
+      "replaced_role": "w1",
+      "role_items": {
+        "w1": "item1",
+        "w2": "item2"
+      }
+    },
+    {
+      "trial": "t3",
+      "order": 3,
+      "pair": "p2",
+      "condition": "B",
+      "variant": "x",
+      "scenario": "p2-x",
+      "scenario_sha256": "4af07155cd0001212224ffa469bb2e7672d23ed3fbd53c0aba1fbf8e91b48b9b",
+      "replaced_role": "w2",
+      "role_items": {
+        "w1": "item2",
+        "w2": "item1"
+      }
+    },
+    {
+      "trial": "t4",
+      "order": 4,
+      "pair": "p2",
+      "condition": "A",
+      "variant": "y",
+      "scenario": "p2-y",
+      "scenario_sha256": "78145303fb5a5083ff362b5e9bf97df9fd6777ef33d0c755f95d23fd73755b1c",
+      "replaced_role": "w1",
+      "role_items": {
+        "w1": "item2",
+        "w2": "item1"
+      }
+    }
+  ],
+  "budgets": {
+    "wall_ms_per_trial": 720000,
+    "tool_calls_per_role_per_trial": 40,
+    "role_budget_includes_replacement": true,
+    "tool_call_definition": "One admitted covered native local operation, not a universal native count: Bash once including declared transport continuations, real native apply_patch individually, distinct native retry IDs separately; duplicate delivery cannot execute/reserve again. Reserve before execution; failed/unknown launch/terminal/resource access never refunds; retain earlier durable effects.",
+    "provider_usage_budget": "not capped by the pilot; logged separately when native usage records exist",
+    "no_selective_extension": "bounds are never extended after an outcome is seen; a trial that reaches a bound is stopped and recorded as such",
+    "claim_ttl_ms": 120000,
+    "admitted_per_role_per_trial": 40,
+    "attempts_and_denials": "every submitted invocation is logged as attempted; denied ones are logged separately with the reason and never counted as admitted or dropped",
+    "count_hook": {
+      "kind": "required independently trusted mandatory native admission/terminal/lifecycle/coverage control; installed capability unresolved",
+      "allowed_tools": ["Bash", "apply_patch"],
+      "authority": "Protocol section 5: separate N producer and private FD/identity inaccessible to W/U; worker-callable hooks/socket/logs are not authentic native authority.",
+      "counter": "serialized append-only trusted state; original and replacement share base-role 40 counter; no age-based lock stealing",
+      "failure_rule": "V4-authority; missing/forged/contradictory/untrusted evidence or unsupported mandatory interception is HOLD/invalid, never native credit",
+      "settings_delivery": "Invocation-local normal permissions and pinned exact argv; equal tool disables for both arms; no global auth/config edits; final concrete argv separately reviewed before installed smoke",
+      "records": "native tool/session/turn/invocation/retry/transport IDs, synthetic public role, one slot ID, category and ordered operation categories, admission/terminal/lifecycle/coverage provenance/time; raw inputs private only",
+      "must_be_smoke_tested": "D5: all C1-C10 and eight native checks with real retained linked evidence; source fixtures/booleans cannot substitute",
+      "deny_after": "40 admissions, deadline, closure or retirement; authentic pre-rejection has zero slots and zero subject effects"
+    },
+    "schedule_lateness_tolerance_ms": 15000,
+    "wall_includes": "replacement startup and claim-expiry waits are inside the same 12-minute wall budget",
+    "no_pause_or_extension": "No pause, refund, counter reset, selective retry, claim release at replacement or extension. Subject tokens not capped.",
+    "deadline_state": "at the deadline the harness blocks new calls, stops only run-owned activity and captures the state; work completing after the deadline does not enter the scored artifact",
+    "unit": "admitted covered native local operation",
+    "transport_reporting": "write_stdin polls/continuations and available full runtime-call totals are reported separately from admitted operations; unavailable without complete run-owned runtime records",
+    "prospective_before_new_v4_scored_trials": true
+  },
+  "timeline_ms_from_t0": {
+    "t0": "the packet barrier: trial.started is recorded once both packets are delivered; all offsets use this one monotonic trial clock",
+    "overlap_opportunity": "exists from t0 by construction: both items need the same new shared helper",
+    "decision_change_issued": 240000,
+    "handoff_checkpoint_requested": 330000,
+    "context_replacement": 360000,
+    "hard_stop": 720000,
+    "lateness_tolerance_ms": 15000,
+    "scheduled_events": {
+      "decision.issued": 240000,
+      "checkpoint.reached:handoff_requested": 330000,
+      "checkpoint.reached:replacement_started": 360000
+    }
+  },
+  "role_mapping": [
+    {
+      "pair": "p1",
+      "w1": "item1",
+      "w2": "item2"
+    },
+    {
+      "pair": "p2",
+      "w1": "item2",
+      "w2": "item1"
+    }
+  ],
+  "subject": {
+    "family": "GPT-6.1-Sol",
+    "effort": "high",
+    "same_for_both_conditions": true,
+    "exact_model_id": "gpt-6.1-sol",
+    "runtime": "Codex CLI",
+    "runtime_version_rule": "Exact later installed runtime/binary/dependency closure and actual observed model/effort bind execution freeze after final-head smoke; no runtime capability accepted by this draft."
+  },
+  "semantic_reviewer": {
+    "family": "GPT-6.1-Sol",
+    "effort": "xhigh",
+    "separate_from_subjects": true
+  },
+  "packet_recipe_contract": {
+    "revision": "v4-draft-v2",
+    "path": "docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v2.md",
+    "sha256": "827c2977727f7facd22215baac3d30f44e30e8f932df09f14df8896a514f3897",
+    "sections": [1, 4],
+    "rendered_packets": "Unavailable until separately reviewed implementation; bind actual original/replacement packets before execution freeze. No passing future packet receipt."
+  },
+  "comparator_contract": {
+    "path": "docs/evidence/issue-194-comparator-v4-draft-v2.json",
+    "sha256": "f02879c162507e893a12e8018da07746325fe82644fff69a076acd8c29dcd4bc",
+    "runner_source_sha256": null,
+    "reason": "No new runner in method draft; actual independent runner/decoder identity required at D3 and execution freeze."
+  },
+  "future_execution_identity_requirements": [
+    "clean_source_sha",
+    "observed_subject_model_and_effort",
+    "runtime_binary_and_dependency_closure",
+    "normal_permissions_and_exact_argv",
+    "allowed_tools",
+    "isolation_mount_rootfs_identity_network_resource_profile",
+    "finite_client_api_provider",
+    "trusted_admission_terminal_decoder_lifecycle_coverage",
+    "evaluator_comparator",
+    "capture_schema_and_complete_coverage",
+    "rendered_original_replacement_role_packets",
+    "independent_source_infrastructure_review_receipts",
+    "fresh_completed_installed_exact_head_smoke_C1_C10_and_eight_native_checks",
+    "lead_GO_before_execution_freeze"
+  ],
+  "validation": "Rebuild entire declaration body from actual artifact bytes, regenerated fixtures and rubric budgets/timeline/subject/reviewer/roles plus method contracts, not only fixture allocation; node --test scripts/dogfood-study-method-v4.test.mjs. Old manifest-check validates v3 only.",
+  "fixture_components": {
+    "scenarios": {
+      "p1-x": {
+        "repoFiles": "9e3a4b37d2b733f4cd886c2fe73b507a145f061fcd08d886420bd9cbbff32a5d",
+        "cases": "9a7e90920d32f45b2a9ecdcef6b03bc5be3d764aab93e195b41ebcd92667fe1f",
+        "reference": "dd14e084215aa01333cfd3f694e04788e34dbe98fbfd122a6428aa10b035006f",
+        "mutant": "01671ce0c0f1dc49cc477036fc632b73800ef491f60d262d1333b445bcb4099d",
+        "decision": "2841bf24fb74fd46b7267a7a69ad007decc3e99110fa474386742e77cbdc63dc",
+        "helper": "e4f7e05360c4bf62646190b1596225886599d0edadf7369efde8a5fbc8ed8e6d",
+        "items": "e96f741ff779492d5631bdf14bb7b2d2c2ec29c2555439085c855da4082d94d3",
+        "frozenPaths": "0bac3fb5aa7c2e23fd9231d4d4efc44cc9a9d3fa2f4d1a3dba7836997c267f20",
+        "sharedPaths": "66122f4526fe68ee37c5e0b254c74508305f88a3a8ea4e6dae22df04161d7908"
+      },
+      "p1-y": {
+        "repoFiles": "d2486e2e399b498f6ffaa113cad9e1dc363e125925119ab42271fb89533d29a8",
+        "cases": "86df9a81f219e207f483aa89458cf6f921df6e3f9aa43afd2bad213ab2feb40d",
+        "reference": "c98db4402ae34ebdbbd89cc87600156e2b5573321a0a651d7fde071eb698a46a",
+        "mutant": "61dee7eb66d316242da81df3cd34e33e0c59ae3866a7d77e23b90cf5725805f0",
+        "decision": "150b1dc29e9b214c8cf02c26b322f098b064488a0274e75528159dabfa3eb3d1",
+        "helper": "4d0e6d30b0cbf639069513b7899c50d1db979e8145db5cdd8f9442c9d3fc3473",
+        "items": "2283de830b78215a344a60fde3e036f5ce9f3272fc8fbe716d633d35450fe6a4",
+        "frozenPaths": "651babd8b14252b034c1920e4d2022e274c66b6683f5a53cffe34a48a0d7d771",
+        "sharedPaths": "d89d5a6d525b3bd530814367990f3e46d050bdd3a33204b1c2ed725d0f9afb16"
+      },
+      "p2-x": {
+        "repoFiles": "cce39f11f92ed25409c0500aa48c673078a969bb1f1a1ffb82316163affd7975",
+        "cases": "aa8358f20971e56ea793f60e3b5f93f99f4fe12d7ffae8c60e9b06a78ab2db99",
+        "reference": "e7230ec8cd016f4bd56d80e7f3928c83d419404533abf40eb2d682edfc3773a7",
+        "mutant": "ceb13890d64385d9e1fc251dbac863493f04af694ddf3a67398c4642f380e526",
+        "decision": "54987e2588d88a20714406802238baba5ca440c790b6c2fa5044b6c085922665",
+        "helper": "0fc9c8be1c80e3dd8a54d81767b180eb49e0095e51962cf0f69c113024a7f09b",
+        "items": "6cec0714dd6ed53436e713800776d6065562de73503b70186940278e49ddc4d1",
+        "frozenPaths": "8425b19f5b2e0e3eee39e9456eeb5f5f31d60c804f45742f1b358fd807f3a0b4",
+        "sharedPaths": "9a3f4de73d82b43c5239b58796761b2ea53ad398339abc257e5c2ffd83886bae"
+      },
+      "p2-y": {
+        "repoFiles": "5e448435376be5f8a80539d058f5386bce23a6c5e01b9479026a161e6156f480",
+        "cases": "eba3f6b6fd6a80dc1cd5357fbb131d3631da8d2fbe4c248c0be3a75607de21ec",
+        "reference": "580d979d77ebb3af61a67c8e8e182e748a8ae1079dfe2c30e67bce6f8581ab0e",
+        "mutant": "d783124229664b71ca51d6f96aa7df4fca57bd06e788b64bf9b29b0378a762ed",
+        "decision": "32bcdb0bf6e6fc9a8e005a9cfd6f850cc5451fe8b4da24e55ecb2ca67942aa4d",
+        "helper": "a9b6f446a6d3f961903cacdbc97f02aeca2a66d0f40f5c1b4286d7d97a170482",
+        "items": "9c299e01f44cc7c28040d706684dc80cf247c63bc2614c1c665d4ccefbe91433",
+        "frozenPaths": "2519a2526b3e28fb6a058199d7c92710f12095c46ac77ca9c4ddcc102ec803ae",
+        "sharedPaths": "afd1622e24951986ef31bf832260ce934fea6927e05af261d716ffb341cca67d"
+      },
+      "warmup-w": {
+        "repoFiles": "b1ac6ccf316b4d3c7e7c6b8fd9efee0ff5e4a732a4de238da1d39c3512744c7a",
+        "cases": "a24a3e3b2e504e4f2045e2e128b9f2b07caee865cb9d1ce405575ee454e301ad",
+        "reference": "929db190a1a63b070c123834ea6ebc9156f26be32d0b4806cc3d42bf410825e3",
+        "mutant": "0aa88640fd98f4ef8f55575f5650620b19e2d91512308f7ce769c75cf7b607d0",
+        "decision": "7f89285f70be8a7d030614b47070e5d024df8a2aee7ca08c2701126a95b1f9b6",
+        "helper": "73083addcfa52639ad17e31bb3a80b5504980eea1f296a27b59d8209e3899e9a",
+        "items": "c8576c8e285f362baa5fa71a3d5bdb9ba9eca71773f5a04289a512776db1c670",
+        "frozenPaths": "8abc1708703a6ca3e8b245595a5211431c73089f3cda6c28d726fb552d7f81b9",
+        "sharedPaths": "303aef3036a8da22d3a6eebf78fc36a18bb8099d1d0ce4e90b0eaaf05551cc1c"
+      }
+    },
+    "original_runner_source_sha256": "0af890c3d74053366a0d6ea812b30db964ffe33f9ceb48ce036e6bd787df2f19"
+  },
+  "declaration_sha256": "5953a8fc695860bfcdb9873699b77c4446943fb90cf673bbed79d888dfbbe157",
+  "provider_reference_source": {
+    "reference_commit": "5a3cd6463eab41cb5bc0307f89839af280c3412b",
+    "meaning": "Existing public source identities underlying inventory mappings only; no v4 provider implementation, clean execution source or runtime receipt is asserted. Final provider/executor identities must be reviewed anew.",
+    "files": {
+      "scripts/dogfood-study-tila.mjs": "5f6f0ee7651d37d0565f0bcac8fff1047dfffc389f5b229edae746b059402446",
+      "scripts/dogfood-study-sdk.ts": "720b1429f63e105d6fe1a2901147b31f12802bbfa61a52eae7de6867de7da4b1",
+      "scripts/dogfood-study-lib.mjs": "25337a2b00f6593091b4e4e8ce08adc55892f9f0bf30569bd844331e87319296",
+      "packages/cli/src/index.ts": "6e11343cade113d91165a09d28a09f229249cdf1cc6a85bedfe92cc559b59a14",
+      "packages/cli/src/commands/task.ts": "09f8b0fb536abacb1a074e483fb30dbf680a09fedcc553327ff6a728f6e26940",
+      "packages/cli/src/commands/state.ts": "e5638ec1a215aaa7cd6c6e719b7b6fe6fd5d1af7ff8de92b9c4927ba6e7feb79",
+      "packages/cli/src/commands/artifact.ts": "65a9cb5ab0c088bc07ab1a7e90a0967d4084c6506699257166dc2bc320d7cd58",
+      "packages/cli/src/commands/journal.ts": "5d913fab6f6cde28cb807129112e983060b9a8755dd56bb642ea1344e90ea835",
+      "packages/cli/src/lib/output.ts": "030026326007fb28e58c36821b4bc6b2bc1e96f361d0487266af26c5dd202122",
+      "packages/sdk/src/local/index.ts": "9e151c915bbd1339a213c6e8f9bd27e74bdf41708da59dcb51364f8447e6285c",
+      "packages/sdk/src/local/resource-adapters.ts": "106a9922d8b19e161b929a60381212707a9816c229187fc6d4aec0efe40006e4",
+      "packages/backend-embedded/src/embedded-project.ts": "974dffd137c7ace847942bfd329749c7918fb3886aafe5560f735b8db76b4eab",
+      "packages/ops-sqlite/src/coordination-ops.ts": "808f35d2861b6e81e0fb54533478d48755a6d2fb10a9282fd4b2968f2d2e49b0"
+    }
+  },
+  "previous_draft": {
+    "draft_revision": 1,
+    "meaning": "Retained source identities only; revision 1 remains unchanged and is not execution evidence.",
+    "artifacts": {
+      "protocol": {
+        "path": "docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v1.md",
+        "sha256": "2fc2777a8ccc22d376f53bfb2331fda79847ef4ed9c4b5e930fea31627c71b61"
+      },
+      "rubric": {
+        "path": "docs/evidence/issue-194-rubric-v4-draft-v1.json",
+        "sha256": "45e685adaa773ce92df9866a6fe83dbbbe36a695a1bd743dd63fe6a0ba57d069"
+      },
+      "inventory": {
+        "path": "docs/evidence/issue-194-service-inventory-v4-draft-v1.json",
+        "sha256": "787040d7305862982d2638ebeb9fda9b0035b0c4e74b3712d58f54a1cff16976"
+      },
+      "comparator": {
+        "path": "docs/evidence/issue-194-comparator-v4-draft-v1.json",
+        "sha256": "6a20475e348a9bb7098bef6397496a6c3af8dc19689aa45e1f666bc510dd02e3"
+      },
+      "declaration": {
+        "path": "docs/evidence/issue-194-declaration-v4-draft-v1.json",
+        "sha256": "a5aa63cbb76ccc952cc83f435bff18fe706f0e285399599755268bed1cce9a6e"
+      }
+    }
+  }
+}
