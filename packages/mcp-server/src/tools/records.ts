@@ -14,7 +14,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_get",
-    "Get a record by type and key. Returns the full record value, metadata, tags, and fencing token needed for subsequent mutations.",
+    "Get a record by type and key. Returns the full record value, metadata, tags, and fencing token needed for subsequent mutations. Needs read access to the key: a credential whose record restrictions admit the key only for writing is refused.",
     {
       type: z.string().describe("Record type (e.g. 'pipeline_config')"),
       key: z.string().describe("Record key (e.g. 'prod' or 'env/staging')"),
@@ -34,7 +34,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_set",
-    "Set (full replace) a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token.",
+    "Set (full replace) a record's value. Requires a fencing token from tila_record_get, or the fence in the receipt of an earlier write to the same key. Returns the new fencing token. A credential that may write the key but not read it (its record restrictions admit the key only for writing) gets a receipt -- ok, receipt: true, type, key and fence -- instead of the record: no value, revision or timestamps.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
@@ -45,7 +45,7 @@ export function registerRecordTools(
         .number()
         .int()
         .describe(
-          "Fencing token from tila_record_get -- required for write authorization",
+          "Fencing token from tila_record_get, or from the receipt of an earlier write -- required for write authorization",
         ),
     },
     async ({ type, key, value, fence }) => {
@@ -63,7 +63,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_put",
-    "Fenceless create-or-replace of a record's value -- creates the record if the key is missing, otherwise fully replaces its value. Does NOT require a fencing token. Intended for single-writer canonical writes where one agent owns the key. Contrast with tila_record_set, which REQUIRES a fence (from tila_record_get) and is collaborative-safe under concurrent writers. WARNING: tila_record_put is last-writer-wins and silently clobbers concurrent updates -- do NOT use it on a key that another writer mutates via tila_record_set or tila_record_patch.",
+    "Fenceless create-or-replace of a record's value -- creates the record if the key is missing, otherwise fully replaces its value. Does NOT require a fencing token. Intended for single-writer canonical writes where one agent owns the key. Contrast with tila_record_set, which REQUIRES a fence (from tila_record_get) and is collaborative-safe under concurrent writers. WARNING: tila_record_put is last-writer-wins and silently clobbers concurrent updates -- do NOT use it on a key that another writer mutates via tila_record_set or tila_record_patch. A credential that may write the key but not read it gets a receipt (ok, receipt: true, type, key and fence) instead of the record.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key (e.g. 'prod' or 'env/staging')"),
@@ -94,7 +94,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_patch",
-    "Apply a JSON Merge Patch (RFC 7396) to a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token.",
+    "Apply a JSON Merge Patch (RFC 7396) to a record's value. Requires a fencing token from tila_record_get. Returns the new fencing token. Also needs read access to the key, because the stored record is returned: a write-only credential is refused.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
@@ -123,7 +123,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_list",
-    "List records of a given type. Returns metadata only (type, key, revision, updated_at, updated_by, archived, tags) -- no value field. Use tila_record_get to read individual record values.",
+    "List records of a given type. Returns metadata only (type, key, revision, updated_at, updated_by, archived, tags) -- no value field. Use tila_record_get to read individual record values. Lists only the records the credential may read.",
     {
       type: z.string().describe("Record type to list"),
       tag: z.string().optional().describe("Filter by tag"),
@@ -164,7 +164,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_archive",
-    "Archive a record. Requires a fencing token from tila_record_get. Returns the new fencing token.",
+    "Archive a record. Requires a fencing token from tila_record_get. Returns the new fencing token. Also needs read access to the key, because the stored record is returned: a write-only credential is refused.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
@@ -190,7 +190,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_unarchive",
-    "Unarchive a previously archived record. Requires a fencing token from tila_record_get. Returns the new fencing token.",
+    "Unarchive a previously archived record. Requires a fencing token from tila_record_get. Returns the new fencing token. Also needs read access to the key, because the stored record is returned: a write-only credential is refused.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
@@ -216,7 +216,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_history",
-    "Get revision history for a record. Returns newest-first list of revisions with operation, timestamp, and actor.",
+    "Get revision history for a record. Returns newest-first list of revisions with operation, timestamp, and actor. Needs read access to the key.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),
