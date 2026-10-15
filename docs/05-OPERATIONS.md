@@ -1614,6 +1614,95 @@ Known gotchas:
 - `wrangler-action` skips interactive confirmation prompts in CI (non-TTY environment)
 - If migrations fail in CI, check that the `wrangler.toml` path and database binding name are correct
 
+## Project checkpoint recovery
+
+Checkpoint recovery restores a complete verified archive: project SQLite content,
+referenced artifact bytes and archived journal objects, plus the project display
+name and schema metadata. Current access rules remain in effect. It selects the
+latest checkpoint **at or before** the requested timestamp and reports its actual
+time; it does not reconstruct changes between checkpoints or accept Cloudflare
+bookmarks.
+
+Deploy the Worker before using these commands. Project migration 45 adds recovery
+bookkeeping and completion receipts; there is no D1 migration or new secret. Run
+from the configured cloud project's directory with `INFRA_ADMIN_TOKEN` set, or
+with the matching infrastructure-owner credential configured locally. Explicit
+`--instance` selection must match that project. Local-mode projects retain the
+existing `project export` / `project import` workflow.
+
+```bash
+tila project checkpoint create --directory /var/backups/tila/project-a --json
+tila project checkpoint list --directory /var/backups/tila/project-a --json
+tila project restore --directory /var/backups/tila/project-a --to 2026-10-15T12:00:00Z --dry-run --json
+tila project restore --directory /var/backups/tila/project-a --to 2026-10-15T12:00:00Z
+```
+
+Restoration requires typed project confirmation. Unattended callers must provide
+`--force`; `--json` alone does not authorize replacement. Both `Z` and explicit
+UTC offsets are accepted; timezone-free timestamps are rejected. A preview only
+reads local archives and server capabilities. The actual command verifies its
+selection again before writing.
+
+Checkpoint archives retain format version 1 and include a checksummed optional
+`checkpoint.json` entry identifying the project, source instance/account, unique
+checkpoint ID and server-reported snapshot time. Selection verifies archive
+contents, rather than trusting filenames or modification times. Equal timestamps
+are ordered by checkpoint ID. Only the supplied directory is scanned. Corrupt,
+unsupported or partial candidates stop timestamp selection instead of silently
+falling back to an older recovery point. A checkpoint for another project or
+instance is refused; use a separate directory per project. Older archives without
+checkpoint metadata remain importable through `project import`.
+
+### What recovery preserves
+
+| Restored from the checkpoint | Preserved from the destination |
+|---|---|
+| Tasks, records, relationships, schema, project configuration and history | Project ID, Cloudflare account, creation provenance and archived state |
+| Referenced artifact bytes and archived journal objects | Current memberships, permissions, service identities and revocations |
+| Display name and schema metadata | Integration configuration, credential/security audit history and existing credential revocations |
+
+Live claims and presence are cleared. Every resource's fence advances beyond both
+its current and archived counter; runtime enrollments, bindings and restored
+managed executions are invalidated. Existing credential permissions are not
+rewound. Active destination managed executions must first be reconciled and
+finished. The command does not undo external effects already performed by workers.
+
+### Interrupted recovery
+
+Before replacement, the SDK creates and verifies a safety archive while holding
+the same write freeze. It stores the operation record and safety archive beneath
+`/var/backups/tila/project-a/.safety/`; these files never enter ordinary checkpoint
+selection. Keep that directory until recovery has been verified. If the current
+project has an unreadable live blob, safety capture fails before replacement;
+repair its lifecycle metadata or recover the missing bytes before retrying.
+
+Errors identify the operation ID. Resume and rollback use that exact record, not
+the newest checkpoint or newest safety archive:
+
+```bash
+tila project restore --directory /var/backups/tila/project-a --resume <operation-id> --force --json
+tila project restore --directory /var/backups/tila/project-a --rollback <operation-id> --force --json
+```
+
+Rollback is for an interrupted replacement. It restores that operation's safety
+archive and retains current access. An expired safety-export lock requires a new
+operation. After replacement starts, failures leave the project in maintenance
+until the operation is resumed or rolled back. A successful response requires the
+server's persisted completion receipt; retrying after a lost response does not
+apply the snapshot again. The restored journal includes `project.restored` with
+the operation, checkpoint, requested time, snapshot time and restore policy.
+
+Checkpoint creation can be run by an external scheduler. Scheduling, retention,
+off-host copies and protection of the local backup directory are operator-owned;
+these commands install no scheduler and delete no old checkpoints. Files already
+marked as deleted when the checkpoint was taken cannot be recovered from it.
+
+The SDK exposes `createProjectCheckpoint`, `listProjectCheckpoints`,
+`selectProjectCheckpoint`, `planProjectRecovery` and `restoreProjectCheckpoint`
+from `tila-sdk/backup`. Pass the reviewed plan directly to restoration so it
+cannot reselect a different timestamp target. This explicit recovery policy does
+not change the access-metadata behavior of ordinary archive imports.
+
 ## Migration Safety (PITR Rollback)
 
 Per-project DO SQLite migrations run automatically inside `blockConcurrencyWhile` on every cold start. To protect against bad migrations corrupting a DO's SQLite state, the migration runner captures a **PITR (Point-in-Time Recovery) bookmark** before applying any pending migrations.
@@ -1634,9 +1723,7 @@ Per-project DO SQLite migrations run automatically inside `blockConcurrencyWhile
 
 1. **Identify the crashing DOs** via Cloudflare Dashboard → Workers → Durable Objects → Errors, or via `ANALYTICS` (Analytics Engine) error events.
 2. **Push a corrected Worker deployment** with the fixed migration SQL. On the next cold start, the bookmark restore ensures the migration runs against the pre-failure state.
-3. If a manual restore to an earlier state is needed (e.g., the bad migration was applied on a previous deploy before PITR capture was in place), use the **Cloudflare Dashboard**:
-   - Navigate to Workers & Pages → Durable Objects → your DO namespace → the specific DO ID → PITR.
-   - Select a bookmark from the **30-day window** and restore.
+3. For manual project recovery, use a verified checkpoint as described above, or import an existing complete backup. This release does not expose arbitrary-time or bookmark-based DO recovery. The previously documented dashboard PITR selector was not verified and must not be relied on. Cloudflare's native DO PITR API remains the mechanism used internally for migration-failure rollback; it does not rewind D1 or R2 alongside the DO.
 
 ### Caveats
 
