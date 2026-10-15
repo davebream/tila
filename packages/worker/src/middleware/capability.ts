@@ -19,6 +19,7 @@ import {
 import type { Context, MiddlewareHandler } from "hono";
 import { forwardToDO } from "../lib/do-forward";
 import type { Env, HonoVariables } from "../types";
+import { isRecordMetaRead } from "./cache";
 import { resolveTokenMembership } from "./membership";
 import { authorizeProtectedOperation } from "./protected-operation";
 import { principalIdFor } from "./request-identity";
@@ -529,23 +530,17 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
       }),
     );
     c.set("authorizationChecked", true);
-    c.header(
-      "Cache-Control",
+    // Every scoped response is uncacheable. The conversation surfaces and the
+    // metadata-only record read are also marked private.
+    const cacheControl =
       /^\/projects\/[^/]+\/(?:agents|runtime-view|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
         c.req.path,
-      )
+      ) || isRecordMetaRead(c.req.method, new URL(c.req.url))
         ? "private, no-store"
-        : "no-store",
-    );
+        : "no-store";
+    c.header("Cache-Control", cacheControl);
     await next();
-    c.header(
-      "Cache-Control",
-      /^\/projects\/[^/]+\/(?:agents|runtime-view|rooms|inbox|dispatch|deliveries)(?:\/|$)/.test(
-        c.req.path,
-      )
-        ? "private, no-store"
-        : "no-store",
-    );
+    c.header("Cache-Control", cacheControl);
   };
 }
 
