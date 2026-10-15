@@ -3,6 +3,7 @@ import { defineCommand } from "citty";
 import { type ProjectBackupSource, exportProjectBackup } from "tila-sdk/backup";
 import { requireTokenAsync } from "../../auth";
 import { findConfig } from "../../config";
+import { assertExplicitInstanceTarget } from "../../lib/explicit-instance";
 import { printJson } from "../../lib/output";
 import * as p from "../../lib/prompts";
 
@@ -28,6 +29,7 @@ export default defineCommand({
       throw new Error("--output must be an absolute path");
     const config = findConfig();
     if (!config) throw new Error("No tila project found");
+    await assertExplicitInstanceTarget(config);
     let source: ProjectBackupSource;
     if (config.backend === "local") {
       if (!config.local?.db_path || !config.local.artifacts_path)
