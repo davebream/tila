@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Task `data` is now limited to 256 KiB, measured as the UTF-8 byte length of its JSON (`MAX_TASK_DATA_BYTES`, 262,144 bytes). Creating a task, or updating one so that its merged data exceeds the limit, answers `413 payload-too-large` with `retryable: false`; data exactly at the limit is accepted. Clients that stored larger task data must trim it: a task already over the limit can only be updated to something strictly smaller. Records keep their 64 KiB bound. There are no migrations (#519).
 
+- Correcting a project report (`corrects_seq`) is now limited to the report's original reporter and to project maintainers and owners. Any other participant, including one holding `journal:append` and `journal:read`, receives `403 report-correction-denied` with `retryable: false`, and nothing is recorded; send a new report without `corrects_seq` instead. The original reporter stays authoritative through a chain, so a maintainer's correction does not transfer authorship, and a correction event records the actual corrector's `principal_id`. A CLI/API token and a dashboard session are different principals. A chain of more than 256 corrections can be extended only by a maintainer or owner. Corrections already recorded are unchanged, and reports that do not set `corrects_seq` are unaffected. There are no migrations (#518).
+
 ### Fixed
 
+- Any participant with `journal:append` and `journal:read` could correct another principal's project report, or correct a correction repeatedly, so a consumer treating the latest correction as authoritative had to compare principals itself. The correction is now refused unless it comes from the original reporter or a maintainer/owner; an accepted retry still returns its original receipt, and a refusal writes no event, receipt or rate count (#518).
 - Creating a relationship to a task that does not exist, for any relationship type, answers `404 not-found` naming the missing id with `retryable: false`, instead of a retryable `500 internal` from the foreign key. `from_id` is checked first. Valid requests, duplicates and the `parent-child` leaf rejection are unchanged (#519).
 - Creating a task with very large data, such as a 16 MiB field, answers `413 payload-too-large` before the write instead of a retryable `500` from SQLite (#519).
 

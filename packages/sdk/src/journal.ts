@@ -14,6 +14,15 @@ export function createJournalMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/journal`;
 
   return {
+    /**
+     * Append a project report. Setting `corrects_seq` appends a correction of
+     * an earlier report; history is never rewritten. Only the original
+     * reporter's principal, or a project maintainer or owner, may correct a
+     * report, and a correction keeps the chain's original reporter. Anyone else
+     * receives a non-retryable 403 `report-correction-denied` and nothing is
+     * recorded. A CLI/API token and a dashboard session are different
+     * principals, even for one person.
+     */
     async append(
       input: JournalAppendRequest,
       options: { idempotencyKey: string },

@@ -175,7 +175,7 @@ Artifact results expose provenance and review state; a matching hash does not es
 | Tool | Description |
 |------|-------------|
 | `tila_journal_list` | Query the project event journal |
-| `tila_journal_append` | Append a project-visible authenticated report; requires a stable idempotency key and never changes work state. Cloudflare only. |
+| `tila_journal_append` | Append a project-visible authenticated report; requires a stable idempotency key and never changes work state. `corrects_seq` appends a correction that only the original reporter or a project maintainer/owner may make (`report-correction-denied` otherwise). Cloudflare only. |
 | `tila_reentry` | Recover summary, journal changes, live claims, pending signals, and a relevant handoff |
 | `tila_journal_replay` | Replay oldest-first journal pages, including archived history |
 | `tila_journal_cursor_get` | Read the current participant's durable acknowledged cursor |
