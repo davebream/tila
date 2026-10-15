@@ -1412,7 +1412,7 @@ These are structural checks — they verify "does this edge make sense in the de
 
 #### Work lifecycle and readiness
 
-An optional `[work_units.<type>.lifecycle]` declares the business states used for readiness. It does not enroll or launch work. The checked-in task definition uses `status`, dispatches only from `open`, and treats `done` as successful while `cancelled` remains terminal but does not satisfy dependencies.
+An optional `[work_units.<type>.lifecycle]` declares the business states used for readiness. It does not enroll or launch work. The checked-in task definition, like the one `tila project create` generates, uses `status`, dispatches only from `open`, and treats `done` as successful while `failed`, `cancelled` and `deferred` remain terminal but do not satisfy dependencies.
 
 | Field | Meaning |
 |---|---|
@@ -1423,6 +1423,10 @@ An optional `[work_units.<type>.lifecycle]` declares the business states used fo
 | `on_start`, `outcomes.success/failure/cancelled/abandoned` | Optional execution-to-business-state mappings; absent mappings leave business status unchanged |
 
 Declared states must match the field's allowed values when present. Start mappings cannot be terminal. Outcome mappings may target nonterminal states: an attempt can fail and return a ticket to `open` for a retry, or succeed and leave it awaiting review. Entity writes validate lifecycle field values against the current definition within the project transaction; custom terminal transitions enforce pending gates, including gates addressed by the canonical resource name.
+
+`tila task close <id> --outcome <outcome>` closes work through this declaration, in local and remote mode alike. It reads the task's type and the applied definition, looks up `lifecycle.outcomes.<outcome>`, and writes that state to `lifecycle.field`. It writes no other field: it never stores `status: closed` or an `outcome` value. Accepted outcomes are `success`, `failure`, `cancelled` and `abandoned`, plus the earlier words `completed` (`success`) and `deferred` (`abandoned`). Anything else is rejected before the backend is opened. The command also refuses, before any write, when no definition is applied or the stored one cannot be read, the task's type declares no lifecycle, the outcome has no mapping, or the mapped state is not listed in `lifecycle.terminal`; an attempt may still map an outcome to a nonterminal state, but closing a task may not.
+
+Existing projects are not migrated. The generated and bundled definitions declare all four outcomes on `status` (`done`, `failed`, `cancelled`, `deferred`), but a project created earlier keeps the definition it applied. To use `task close` there, add a `[work_units.<type>.lifecycle]` table and its `[work_units.<type>.lifecycle.outcomes]` mappings (see `tila.schema.toml`), include the mapped states in the lifecycle field's values, and run `tila schema apply`. Tasks closed by earlier CLI versions keep their stored `closed` status and `outcome` data.
 
 Readiness respects hard and soft dependency edges, unresolved gates, archive state, and transitive prerequisites. Cycles remain blocked with a diagnostic path. Archiving an unfinished predecessor never counts as success; an explicitly successful predecessor can subsequently be archived without losing its recorded success. Configured work depending on an unconfigured type is blocked until its predecessor's lifecycle is declared. The shared evaluator returns diagnostic reasons for missing work, missing lifecycle metadata, unsuccessful dependencies, cycles and gates.
 
@@ -1992,7 +1996,7 @@ tila task new "<title>" [--parent <id>] [--type <type>]
 tila task list [--status=...] [--parent=...] [--ready] [--leaf-only]
 tila task show <id>
 tila task update <id> --field=value
-tila task close <id> --outcome=success|failed|cancelled
+tila task close <id> --outcome=success|failure|cancelled|abandoned   # also: completed, deferred
 tila task archive <id>
 
 tila issue new ...               # same shape as task
