@@ -15,6 +15,13 @@ import {
   resolveToken,
   writeTokenFile,
 } from "../auth";
+import {
+  InstanceKeyMismatchError,
+  KeychainUnavailableError,
+} from "../auth-store/errors";
+import { HumanSessionStore } from "../auth-store/human-session-store";
+import type { SecretStore } from "../auth-store/secret-store";
+import { ThrowingSecretStore } from "../auth-store/testing";
 import { findConfig, findTilaDir } from "../config";
 import { resolveGithubRepoToken } from "../lib/github-exchange";
 import { resetGlobalFlags, setGlobalFlags } from "../lib/global-flags";
@@ -77,6 +84,15 @@ describe("project token resolution", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  const keychainNotice =
+    "OS keychain unavailable; any remembered login was not used. Falling back to project credentials.";
+  function spyOutput() {
+    return {
+      log: vi.spyOn(console, "log").mockImplementation(() => {}),
+      error: vi.spyOn(console, "error").mockImplementation(() => {}),
+      warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+    };
+  }
   function useMode(mode: "tila-token" | "github-repo") {
     vi.mocked(findConfig).mockReturnValue({
       ...config,
@@ -326,6 +342,167 @@ describe("project token resolution", () => {
         );
         expect(getHumanSession).toHaveBeenCalledOnce();
       });
+      describe("with an unavailable keychain", () => {
+        const fileToken = "synthetic-file";
+        const fallback =
+          mode === "tila-token" ? fileToken : "synthetic-exchange";
+        beforeEach(() => {
+          useMode(mode);
+          setTTY(true);
+          writeFileSync(join(dir, ".env"), `TILA_API_TOKEN=${fileToken}\n`);
+        });
+
+        it("continues to the project fallback with one token-free stderr notice", async () => {
+          getHumanSession.mockRejectedValue(
+            new KeychainUnavailableError(
+              "get",
+              new Error("synthetic-cause-secret"),
+            ),
+          );
+          const output = spyOutput();
+          await expect(requireTokenAsync()).resolves.toBe(fallback);
+          expect(getHumanSession).toHaveBeenCalledOnce();
+          expect(getHumanSession).toHaveBeenCalledWith(config.worker_url);
+          expect(resolveGithubRepoToken).toHaveBeenCalledTimes(
+            mode === "github-repo" ? 1 : 0,
+          );
+          expect(output.warn.mock.calls).toEqual([[keychainNotice]]);
+          expect(output.log).not.toHaveBeenCalled();
+          expect(output.error).not.toHaveBeenCalled();
+          expect(JSON.stringify(output.warn.mock.calls)).not.toMatch(
+            /synthetic-(file|exchange|human|cause-secret)|127\.0\.0\.1/,
+          );
+        });
+        it("continues when the real session store reads an unreachable keychain", async () => {
+          vi.mocked(humanSessionStore).mockReturnValue(
+            new HumanSessionStore(new ThrowingSecretStore("get")),
+          );
+          const output = spyOutput();
+          await expect(requireTokenAsync()).resolves.toBe(fallback);
+          expect(humanSessionStore).toHaveBeenCalledOnce();
+          expect(output.warn.mock.calls).toEqual([[keychainNotice]]);
+        });
+        it("recognizes the error by its code across duplicate module copies", async () => {
+          // A second bundled copy of the class is not `instanceof` ours.
+          class DuplicateKeychainUnavailableError extends Error {
+            readonly code = "KEYCHAIN_UNAVAILABLE";
+            readonly step = "get";
+          }
+          const duplicate = new DuplicateKeychainUnavailableError("duplicate");
+          expect(duplicate).not.toBeInstanceOf(KeychainUnavailableError);
+          getHumanSession.mockRejectedValue(duplicate);
+          const output = spyOutput();
+          await expect(requireTokenAsync()).resolves.toBe(fallback);
+          expect(output.warn.mock.calls).toEqual([[keychainNotice]]);
+        });
+        it.each([
+          ["unexpected error", () => new Error("synthetic unexpected")],
+          [
+            "identity mismatch",
+            () => new InstanceKeyMismatchError("synthetic-a", "synthetic-b"),
+          ],
+          [
+            "keychain look-alike without the code",
+            () => new Error('Keychain unavailable at step "get"'),
+          ],
+          [
+            "different keychain code",
+            () =>
+              Object.assign(new Error("synthetic locked"), {
+                code: "KEYCHAIN_LOCKED",
+              }),
+          ],
+          ["non-object failure", () => "KEYCHAIN_UNAVAILABLE"],
+        ])("propagates a %s from the session lookup", async (_, make) => {
+          const failure = make();
+          getHumanSession.mockRejectedValue(failure);
+          const output = spyOutput();
+          await expect(requireTokenAsync()).rejects.toBe(failure);
+          expect(resolveGithubRepoToken).not.toHaveBeenCalled();
+          expect(output.warn).not.toHaveBeenCalled();
+        });
+        it.each([
+          ["undecodable", "synthetic-not-json", SyntaxError],
+          [
+            "unrecognized",
+            JSON.stringify({ token: "synthetic-other", expiresAt: 1 }),
+            "Invalid stored login",
+          ],
+        ])(
+          "propagates a %s stored login from the real session store",
+          async (_, stored, expected) => {
+            const secrets: SecretStore = {
+              get: async () => stored,
+              set: async () => {},
+              delete: async () => {},
+            };
+            vi.mocked(humanSessionStore).mockReturnValue(
+              new HumanSessionStore(secrets),
+            );
+            const output = spyOutput();
+            await expect(requireTokenAsync()).rejects.toThrow(expected);
+            expect(resolveGithubRepoToken).not.toHaveBeenCalled();
+            expect(output.warn).not.toHaveBeenCalled();
+          },
+        );
+      });
+    },
+  );
+  it("keeps a stored human session ahead of the file with the real session store", async () => {
+    setTTY(true);
+    writeFileSync(join(dir, ".env"), "TILA_API_TOKEN=synthetic-file\n");
+    const secrets: SecretStore = {
+      get: async () =>
+        JSON.stringify({
+          token: "tila_u_synthetic",
+          expiresAt: Date.now() + 60_000,
+        }),
+      set: async () => {},
+      delete: async () => {},
+    };
+    vi.mocked(humanSessionStore).mockReturnValue(
+      new HumanSessionStore(secrets),
+    );
+    await expect(requireTokenAsync()).resolves.toBe("tila_u_synthetic");
+  });
+  it.each([
+    ["absent", undefined],
+    ["without the token key", "# comment\nOTHER=ignored\n"],
+  ])(
+    "keeps the missing-token error, after the notice, when the keychain is unavailable and the file is %s",
+    async (_, content) => {
+      setTTY(true);
+      if (content !== undefined) writeFileSync(join(dir, ".env"), content);
+      getHumanSession.mockRejectedValue(new KeychainUnavailableError("get"));
+      const output = spyOutput();
+      const failure = await requireTokenAsync().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      // The keychain failure is not surfaced; the existing guidance is.
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(KeychainUnavailableError);
+      expect((failure as Error).message).toBe(
+        "No API token found.\n\nSet TILA_TOKEN (or the legacy TILA_API_TOKEN environment alias), or add a token to .tila/.env:\n  TILA_API_TOKEN=your-token-here\n\nRun 'tila project create' to provision a new project, or 'tila init' to join an existing one.",
+      );
+      expect(getHumanSession).toHaveBeenCalledOnce();
+      expect(output.warn.mock.calls).toEqual([[keychainNotice]]);
+      expect(output.log).not.toHaveBeenCalled();
+      expect(output.error).not.toHaveBeenCalled();
+    },
+  );
+  it.each(managedMarkers)(
+    "denies %s before a keychain lookup could fall back to the file",
+    async (name) => {
+      setTTY(true);
+      vi.stubEnv(name, "synthetic-managed-marker");
+      writeFileSync(join(dir, ".env"), "TILA_API_TOKEN=synthetic-file\n");
+      getHumanSession.mockRejectedValue(new KeychainUnavailableError("get"));
+      await expect(requireTokenAsync()).rejects.toMatchObject({
+        code: "runtime-purpose-denied",
+      });
+      expect(getHumanSession).not.toHaveBeenCalled();
+      expect(humanSessionStore).not.toHaveBeenCalled();
     },
   );
   it.each(managedMarkers)(

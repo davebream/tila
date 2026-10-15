@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Data commands (`task`, `record`, `artifact` and the others that act on the project in the current directory) no longer ignore an explicit `--instance`. They run only when that instance is registered, trusted and is the Worker of the current directory's project (and `--project`, when given, names that project); otherwise they stop with `invalid-argument` before any credential is read or request is sent. Without `--instance` nothing changes. `tila project destroy` and `tila disconnect` apply the same check before reading credentials or deleting anything; `tila project destroy <slug>` accepts `--instance` only when it is the Worker saved in `~/.tila/infra.toml`. To act on another instance's project, run from that project's directory (#522).
+- Project commands run at a terminal on a host whose OS keychain cannot be read (no Secret Service, locked, or daemon down) no longer stop with `KEYCHAIN_UNAVAILABLE` before reading `.tila/.env`. The unreadable keychain counts as no remembered login, as it does without a terminal: the CLI prints one token-free warning on stderr (a structured diagnostic with `--json`) and continues with the file token or GitHub exchange. `--token`, exported tokens and a readable login keep their precedence, and a corrupt or mismatched stored login still fails (#522).
 
 ## [0.10.0] - 2026-10-14
 
