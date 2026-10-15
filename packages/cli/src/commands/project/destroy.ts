@@ -5,6 +5,10 @@ import { defineCommand } from "citty";
 import { parse } from "smol-toml";
 import { findConfig } from "../../config";
 import { createCloudflareClient } from "../../lib/cloudflare-client";
+import {
+  assertExplicitInstanceIsInfraWorker,
+  assertExplicitInstanceTarget,
+} from "../../lib/explicit-instance";
 import { resolveParticipantId } from "../../lib/global-flags";
 import { loadInfraConfig } from "../../lib/infra-config";
 import { exit, jsonText } from "../../lib/output";
@@ -223,12 +227,22 @@ export default defineCommand({
     }
 
     if (plan.mode === "infra") {
+      // Slug mode acts on the Worker in infra.toml, not on the cwd project; an
+      // explicit --instance must be that Worker or nothing is wiped.
+      await assertExplicitInstanceIsInfraWorker({
+        workerUrl: plan.workerUrl,
+        slug: plan.slug,
+      });
       await runInfraDestroy(args, plan, infraConfig);
       return;
     }
 
     // plan.mode === "local" — the per-project path, using the cwd config.
     const config = plan.config;
+
+    // An explicit --instance must be this project's deployment: refuse before
+    // any credential is read, prompt shown, remote wipe or .tila/ removal.
+    await assertExplicitInstanceTarget(config);
 
     const slug = config.project_id;
     const workerUrl = config.worker_url ?? null;

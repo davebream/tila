@@ -5,6 +5,7 @@ import { requireClient, resolveContext } from "../context";
 import type { AdminListRow } from "../lib/admin-user-arg";
 import { parseGrantArg, resolveRevokeArg } from "../lib/admin-user-arg";
 import { createCliClient } from "../lib/client-factory";
+import { assertExplicitInstanceTarget } from "../lib/explicit-instance";
 import {
   diagnostic,
   exit,
@@ -96,6 +97,9 @@ async function resolveAdminClient(args: {
       }
       return null;
     }
+
+    // The token path builds its client from the cwd config, not the context.
+    await assertExplicitInstanceTarget(config);
 
     return {
       projectId: config.project_id,
