@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { KeychainUnavailableError } from "./auth-store/errors";
 import { findConfig, findTilaDir } from "./config";
 import { resolveGithubRepoToken } from "./lib/github-exchange";
 
@@ -7,6 +8,19 @@ import { getGlobalFlags } from "./lib/global-flags";
 
 const TOKEN_ENV_VAR = "TILA_API_TOKEN";
 const ENV_FILENAME = ".env";
+// Typed against the error class so a renamed code fails typecheck. Matching the
+// code rather than `instanceof` also recognizes the error across duplicate or
+// bundled copies of the auth-store module.
+const KEYCHAIN_UNAVAILABLE: KeychainUnavailableError["code"] =
+  "KEYCHAIN_UNAVAILABLE";
+
+function isKeychainUnavailable(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === KEYCHAIN_UNAVAILABLE
+  );
+}
 
 function resolveEnvToken(): string | null {
   for (const name of ["TILA_TOKEN", TOKEN_ENV_VAR]) {
@@ -140,6 +154,9 @@ export function requireToken(): string {
  * Resolve the API token or throw with actionable error (async).
  * After the managed-runtime guard, --token and then the trimmed TILA_TOKEN /
  * TILA_API_TOKEN env fallback precede human sessions and either auth mode.
+ * A human session lookup that finds the keychain unavailable (recognized by
+ * its stable error code) counts as no session and emits one token-free stderr
+ * warning; other lookup failures propagate.
  */
 export async function requireTokenAsync(): Promise<string> {
   if (
@@ -163,8 +180,21 @@ export async function requireTokenAsync(): Promise<string> {
   if (envToken) return envToken;
   if (config?.worker_url && !process.env.CI && process.stdin.isTTY) {
     const { humanSessionStore } = await import("./lib/human-login");
-    const session = await humanSessionStore().get(config.worker_url);
-    if (session) return session.token;
+    try {
+      const session = await humanSessionStore().get(config.worker_url);
+      if (session) return session.token;
+    } catch (error) {
+      // A keychain that cannot be reached holds no readable login, so project
+      // token resolution continues exactly as it does without a TTY. Any other
+      // failure (corrupt stored login, identity mismatch) still propagates.
+      if (!isKeychainUnavailable(error)) throw error;
+      // A locked keychain may hold a login, so say that the identity changed.
+      // Static text only: no token, URL or error cause reaches the output.
+      const { warning } = await import("./lib/output");
+      warning(
+        "OS keychain unavailable; any remembered login was not used. Falling back to project credentials.",
+      );
+    }
   }
   const authMode = config?.auth?.mode ?? "tila-token";
 
