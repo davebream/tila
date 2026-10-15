@@ -333,13 +333,7 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
       capabilities: CAPABILITIES.filter((cap) => !ROOT_CAPABILITIES.has(cap)),
       restrictions: { task_types: ["task"] },
     });
-    for (const path of [
-      "reentry",
-      "handoffs",
-      "handoffs/one",
-      "journal/replay",
-      "journal/cursor",
-    ]) {
+    for (const path of ["reentry", "handoffs", "handoffs/one"]) {
       expect(
         (await request(server, `/projects/p/${path}`, restricted.plaintext))
           .status,
@@ -360,6 +354,68 @@ describe("scoped HTTP authentication with authoritative D1 persistence", () => {
         )
       ).status,
     ).toBe(403);
+    expect(effects).not.toHaveBeenCalled();
+  });
+  it("lets restricted credentials read the journal list, replay and cursor, and nothing else of it", async () => {
+    const server = app();
+    const grant = {
+      role: "owner",
+      capabilities: CAPABILITIES.filter((cap) => !ROOT_CAPABILITIES.has(cap)),
+      restrictions: { task_types: ["task"] },
+    } satisfies CredentialPolicy;
+    const restricted = await issue(grant);
+    const reads = [
+      "journal",
+      "journal/",
+      "journal?after_seq=0&limit=5",
+      "journal/replay?after_seq=0",
+      "journal/cursor",
+    ];
+    for (const path of reads)
+      expect(
+        (await request(server, `/projects/p/${path}`, restricted.plaintext))
+          .status,
+        path,
+      ).toBe(200);
+    expect(effects).toHaveBeenCalledTimes(reads.length);
+
+    effects.mockClear();
+    for (const [method, path, body] of [
+      ["POST", "journal", { event_name: "x" }],
+      ["PUT", "journal/cursor", { seq: 1 }],
+      ["POST", "handoffs", {}],
+      ["GET", "handoffs", undefined],
+      ["GET", "reentry", undefined],
+      ["POST", "admin/archive/journal", {}],
+      ["GET", "journal/replay/extra", undefined],
+      ["GET", "journal/archive", undefined],
+      ["GET", "journals", undefined],
+    ] as const)
+      expect(
+        (
+          await request(
+            server,
+            `/projects/p/${path}`,
+            restricted.plaintext,
+            method,
+            body,
+          )
+        ).status,
+        `${method} ${path}`,
+      ).toBe(403);
+    expect(effects).not.toHaveBeenCalled();
+
+    // Reading the journal still needs the capability, restricted or not.
+    const noJournal = await issue({
+      ...grant,
+      capabilities: grant.capabilities.filter((cap) => cap !== "journal:read"),
+    });
+    for (const path of ["journal", "journal/replay?after_seq=0"])
+      expect(
+        (await request(server, `/projects/p/${path}`, noJournal.plaintext))
+          .status,
+        path,
+      ).toBe(403);
     expect(effects).not.toHaveBeenCalled();
   });
   it("lets restricted credentials reach scoped search and the work catalog only", async () => {
