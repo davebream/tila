@@ -80,11 +80,27 @@ mentions returns no entities, total zero, and `scope.outcome_types: []`.
 Without an outcome filter, `outcome_types` is omitted. Lists include archived
 rows by default, matching HTTP; blocked filtering always excludes them.
 
+`state` takes a non-empty array of task states and `sort: "state"` orders by
+them. A task's state is the value of its type's lifecycle field, or `status` for
+a type that declares no lifecycle, so `state: ["in-review"]` matches tasks of
+every type whatever field holds the state. It is the value a dashboard State
+column shows. Matching is exact, a task without a state matches nothing, and the
+older `status` filter is unchanged.
+
+```typescript
+const reviewing = await tila.tasks.list({
+  state: ["in-review"],
+  sort: "state",
+  order: "asc",
+  limit: "20",
+});
+```
+
 The CLI accepts `tila task list --blocked` and
 `tila task list --type bug --outcome failure,abandoned --limit 20 --json`.
 Continue with `--cursor` from the JSON metadata. MCP `tila_task_list` accepts
-`blocked`, `outcome`, `limit` and `cursor` and retains page metadata in both text
-and structured results.
+`blocked`, `outcome`, `state`, `sort`, `order`, `limit` and `cursor` and retains
+page metadata in both text and structured results.
 
 Without `compact` (or with `compact: false`), the return type retains full entity
 rows. With `compact: true` or a variable boolean, the public result is a union
