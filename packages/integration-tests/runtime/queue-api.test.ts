@@ -3,6 +3,10 @@ import { SignJWT } from "jose";
 import { RemoteAttemptBackend, RemoteQueueBackend } from "tila-sdk";
 import { TilaClient } from "tila-sdk";
 import { expect, it } from "vitest";
+import {
+  jsonBytes,
+  managedWork,
+} from "../../ops-sqlite/test/queue-compact-fixture";
 import { lifecycleDefinition } from "../../ops-sqlite/test/readiness-fixture";
 import { CredentialStore, ProjectMembershipStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash";
@@ -408,7 +412,7 @@ dependency_satisfied = ["done"]
   });
   for (const [id, type, data] of [
     ["hidden", "issue", { phase: "todo" }],
-    ["visible", "ticket", { status: "open" }],
+    ["visible", "ticket", { status: "open", description: "visible brief" }],
   ] as const) {
     expect((await http("/tasks", { id, type, data })).status).toBe(200);
     await queue.enroll({
@@ -421,6 +425,33 @@ dependency_satisfied = ["done"]
   const inspected = await scoped.inspect({ limit: 1 });
   expect(inspected.total).toBe(1);
   expect(inspected.entries[0].entry.task_id).toBe("visible");
+  // Compact applies the same filtering and only ever removes task data.
+  const compact = await scoped.inspect({ limit: 1, compact: true });
+  expect(compact.total).toBe(1);
+  // Waiting age reads the clock; every other count is state.
+  expect({ ...compact.counts, oldest_waiting_age_ms: null }).toEqual({
+    ...inspected.counts,
+    oldest_waiting_age_ms: null,
+  });
+  expect(compact.entries.map((view) => view.entry)).toEqual(
+    inspected.entries.map((view) => view.entry),
+  );
+  expect(inspected.entries[0].task?.data).toMatchObject({
+    description: "visible brief",
+  });
+  expect(compact.entries[0].task).toEqual({
+    id: "visible",
+    type: "ticket",
+    data: { status: "open" },
+  });
+  const raw = await SELF.fetch(
+    `https://worker/projects/${project}/queue?compact=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  expect(raw.status).toBe(200);
+  const rawText = await raw.text();
+  expect(rawText).not.toContain("hidden");
+  expect(rawText).not.toContain("visible brief");
   await expect(
     scoped.enroll({ idempotency_key: "forbidden", task_id: "hidden" }),
   ).rejects.toMatchObject({ status: 403 });
@@ -449,3 +480,89 @@ dependency_satisfied = ["done"]
   expect(await scopedAttempts.list({ limit: 1 })).toHaveLength(1);
   expect((await scopedAttempts.list())[0].task_id).toBe("visible");
 });
+
+it("serves the full listing unless compact is exactly true, and rejects other values", async () => {
+  const { project, token, http, queue } = await fixture();
+  await queue.configure({
+    ...revision({ revision: 0 }),
+    enabled: true,
+    paused: false,
+    execution_limit: 1,
+  });
+  for (const id of ["one", "two"]) {
+    await http("/tasks", {
+      id,
+      type: "issue",
+      data: { phase: "todo", title: `Task ${id}`, description: `Brief ${id}` },
+    });
+    await queue.enroll({ idempotency_key: `enroll-${id}`, task_id: id });
+  }
+  const read = (search: string) =>
+    SELF.fetch(`https://worker/projects/${project}/queue${search}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  // Wall-clock readings differ between two reads of the same state.
+  const stable = async (response: Response) => {
+    const { result } = (await response.json()) as {
+      result: {
+        diagnostics?: unknown;
+        counts: Record<string, unknown>;
+        entries: Array<{ task: { data: Record<string, unknown> } }>;
+      };
+    };
+    return {
+      ...result,
+      diagnostics: undefined,
+      counts: { ...result.counts, oldest_waiting_age_ms: null },
+    };
+  };
+  const absent = await stable(await read(""));
+  expect(await stable(await read("?compact=false"))).toEqual(absent);
+  expect(absent.entries[0].task.data.description).toBe("Brief one");
+  const compact = await stable(await read("?compact=true"));
+  expect(compact.entries.map((view) => view.task)).toEqual([
+    { id: "one", type: "issue", data: { phase: "todo", title: "Task one" } },
+    { id: "two", type: "issue", data: { phase: "todo", title: "Task two" } },
+  ]);
+  for (const value of ["1", "0", "yes", "TRUE", ""]) {
+    const response = await read(`?compact=${value}`);
+    expect(response.status, value).toBe(400);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: { code: "validation-error" },
+    });
+  }
+});
+
+it("returns at least 5x fewer bytes for a 100-task queue sized like the observed one", async () => {
+  const { project, token, http, queue } = await fixture();
+  await queue.configure({
+    ...revision({ revision: 0 }),
+    enabled: true,
+    paused: false,
+    execution_limit: 1,
+  });
+  for (let index = 0; index < 100; index++) {
+    const id = `work-${index}`;
+    expect(
+      (await http("/tasks", { id, type: "issue", data: managedWork(index) }))
+        .status,
+    ).toBe(200);
+    await queue.enroll({ idempotency_key: `enroll-${id}`, task_id: id });
+  }
+  const body = async (search: string) => {
+    const response = await SELF.fetch(
+      `https://worker/projects/${project}/queue?limit=100${search}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status).toBe(200);
+    return new Uint8Array(await response.arrayBuffer()).byteLength;
+  };
+  const full = await body("");
+  const compact = await body("&compact=true");
+  // The issue observed about 575 KB for 100 tasks.
+  expect(full).toBeGreaterThan(500_000);
+  expect(full).toBeLessThan(650_000);
+  expect(full / compact).toBeGreaterThanOrEqual(5);
+  expect(jsonBytes(managedWork(0))).toBeGreaterThan(4_500);
+}, 60_000);

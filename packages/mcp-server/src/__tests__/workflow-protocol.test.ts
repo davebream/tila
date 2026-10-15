@@ -1045,7 +1045,11 @@ values = ["open", "done"]
     undefined,
     { expected_revision: 0 },
   );
-  await a.tasks.create("queued", "task", { status: "open" });
+  await a.tasks.create("queued", "task", {
+    status: "open",
+    title: "Queued",
+    notes: "A long note. ".repeat(40),
+  });
   const client = await connect(a);
   await call(client, "tila_queue", {
     action: "configure",
@@ -1061,6 +1065,19 @@ values = ["open", "done"]
     action: "enroll",
     command: { idempotency_key: "enroll", task_id: "queued" },
   });
+  // The additive compact filter is part of the typed inspect request.
+  const fullView = await call(client, "tila_queue", { action: "inspect" });
+  const compactView = await call(client, "tila_queue", {
+    action: "inspect",
+    query: { compact: true },
+  });
+  expect(fullView.entries[0].task.data.notes).toContain("A long note.");
+  expect(compactView.entries[0].task).toEqual({
+    id: "queued",
+    type: "task",
+    data: { status: "open", title: "Queued" },
+  });
+  expect(compactView.entries[0].entry).toEqual(fullView.entries[0].entry);
   const grant = await call(client, "tila_queue", {
     action: "claim",
     command: { idempotency_key: "claim" },
