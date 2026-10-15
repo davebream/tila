@@ -69,6 +69,23 @@ WI-M legacy rung):
 resolver does not silently drop to a weaker rung on a trust mismatch. Because legacy-fallback is the
 lowest rung, **any trusted registry instance always beats a stale legacy token**.
 
+### Explicit `--instance` and data commands
+
+Data commands (`task`, `record`, `artifact`, `journal` and the rest that act on a project) take their
+project and Worker from the nearest `.tila/config.toml`; they cannot be routed to a different
+instance. An explicit `--instance <key>` is therefore a *proof obligation*, not a selector. The
+command runs only when `<key>` is a registered, trusted instance whose Worker URL is the project's
+`worker_url`, the project's own instance pointer (if any) names `<key>`, and `--project` (if given)
+is the project's `project_id`. Otherwise it stops with `invalid-argument` before credentials are read
+or any request is sent — including from a local project, which has no instance. Only the registry
+file is read. Without `--instance`, behavior is unchanged. Commands that read the project config
+directly (`admin` with a token override, `project export`, `project import`, `disconnect`, and the
+local-plan form of `project destroy`) apply the same check before reading credentials, prompting
+or deleting anything. Infra-owner `project destroy <slug>` acts on the Worker saved in `~/.tila/infra.toml`;
+`--instance` is never a selector there, and an explicit key is accepted only when it is that
+Worker's registered, trusted instance.
+Runtime commands (`machine`, `run`) keep their own `--instance` selection semantics.
+
 The resolver returns a `TrustDecision` (`packages/cli/src/auth-store/resolver-types.ts`):
 
 | Decision | Meaning |

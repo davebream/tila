@@ -57,11 +57,18 @@ vi.mock("../lib/client-factory", () => ({
   createCliClientFromConfig: vi.fn(() => ({})),
 }));
 
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
+import type { InstanceKey } from "@tila/schemas";
 import { requireTokenAsync } from "../auth";
+import { AuthStore, FakeSecretStore, TilaPaths } from "../auth-store";
 import { findConfig } from "../config";
 import { runStartupChecks } from "../context";
+import { createCliClientFromConfig } from "../lib/client-factory";
+import { resetGlobalFlags, setGlobalFlags } from "../lib/global-flags";
 import { checkAccountMatch, verifyCloudflareAuth } from "../lib/wrangler";
+import { LocalProject } from "../local";
 
 const defaultConfig = {
   project_id: "test-proj",
@@ -232,5 +239,115 @@ describe("runStartupChecks", () => {
       const ctx = await runStartupChecks();
       expect(ctx.machine).toBe(os.hostname());
     });
+  });
+});
+
+describe("runStartupChecks with an explicit --instance", () => {
+  let tilaHome: string;
+
+  async function register(key: string, workerUrl: string, trusted = true) {
+    const store = new AuthStore({
+      paths: new TilaPaths(),
+      secrets: new FakeSecretStore(),
+      env: { isCI: false, isTTY: true },
+    });
+    await store.registerInstance({
+      instance_key: key as InstanceKey,
+      instance_id_source: "server",
+      worker_url: workerUrl,
+    });
+    if (trusted) await store.markTrusted(key as InstanceKey);
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    tilaHome = mkdtempSync(path.join(os.tmpdir(), "tila-context-instance-"));
+    vi.stubEnv("TILA_HOME", tilaHome);
+    mockResolveCfApiToken.mockReturnValue(null);
+    vi.mocked(findConfig).mockReturnValue(
+      defaultConfig as ReturnType<typeof findConfig>,
+    );
+    vi.mocked(requireTokenAsync).mockResolvedValue("tok_test123");
+    await register("a-key", defaultConfig.worker_url);
+    await register("b-key", "https://b.workers.dev");
+  });
+
+  afterEach(() => {
+    resetGlobalFlags();
+    vi.unstubAllEnvs();
+    rmSync(tilaHome, { recursive: true, force: true });
+  });
+
+  it("refuses another instance before reading credentials or building a client", async () => {
+    setGlobalFlags({ instance: "b-key" });
+
+    await expect(runStartupChecks({ skipAuth: true })).rejects.toThrow(
+      /different deployment/,
+    );
+
+    expect(requireTokenAsync).not.toHaveBeenCalled();
+    expect(createCliClientFromConfig).not.toHaveBeenCalled();
+    expect(verifyCloudflareAuth).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unregistered instance", async () => {
+    setGlobalFlags({ instance: "ghost" });
+
+    await expect(runStartupChecks({ skipAuth: true })).rejects.toThrow(
+      /unknown instance/i,
+    );
+    expect(requireTokenAsync).not.toHaveBeenCalled();
+    expect(createCliClientFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not open a local project for an explicit --instance", async () => {
+    vi.mocked(findConfig).mockReturnValue({
+      ...defaultConfig,
+      worker_url: undefined,
+      backend: "local",
+      local: {
+        db_path: "/home/user/.tila/projects/test-proj/state.db",
+        artifacts_path: "/home/user/.tila/artifacts/testorg/test-proj",
+      },
+    } as ReturnType<typeof findConfig>);
+    setGlobalFlags({ instance: "a-key" });
+
+    await expect(runStartupChecks({ skipAuth: true })).rejects.toThrow(
+      /local project/,
+    );
+    expect(LocalProject.open).not.toHaveBeenCalled();
+  });
+
+  it("refuses --project that is not the directory's project", async () => {
+    setGlobalFlags({ instance: "a-key", project: "other-proj" });
+
+    await expect(runStartupChecks({ skipAuth: true })).rejects.toThrow(
+      /--project "other-proj"/,
+    );
+    expect(createCliClientFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("proceeds against the directory's project when the instance is provably its own", async () => {
+    setGlobalFlags({ instance: "a-key", project: "test-proj" });
+
+    const ctx = await runStartupChecks({ skipAuth: true });
+
+    expect(ctx.config.project_id).toBe("test-proj");
+    expect(createCliClientFromConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ worker_url: "https://test.workers.dev" }),
+      "tok_test123",
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it("leaves implicit behavior unchanged without --instance", async () => {
+    // No registry entry is needed or consulted for the implicit path.
+    rmSync(tilaHome, { recursive: true, force: true });
+
+    const ctx = await runStartupChecks({ skipAuth: true });
+
+    expect(ctx.config.project_id).toBe("test-proj");
+    expect(requireTokenAsync).toHaveBeenCalled();
   });
 });

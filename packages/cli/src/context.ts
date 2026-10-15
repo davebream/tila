@@ -31,6 +31,7 @@ import {
 import { requireTokenAsync } from "./auth";
 import { findConfig } from "./config";
 import { createCliClientFromConfig } from "./lib/client-factory";
+import { assertExplicitInstanceTarget } from "./lib/explicit-instance";
 import { warnIfRemoteMismatch } from "./lib/github-exchange";
 import { getGlobalFlags, resolveParticipantId } from "./lib/global-flags";
 import { managedRuntime } from "./lib/managed-runtime";
@@ -111,7 +112,8 @@ export function resolveCliIdentity(): {
 
 /**
  * Run the 5-step startup auth check sequence:
- *   1. Find .tila/config.toml (project context)
+ *   1. Find .tila/config.toml (project context); an explicit --instance must
+ *      match it or the command is refused before anything is sent
  *   1.5. Check backend mode (local mode: constructs LocalProject + LocalArtifactBackend and returns early)
  *   2. Verify API token present (env var or .tila/.env)
  *   3. Verify Cloudflare API token     (skipped if skipAuth or non-cloudflare)
@@ -156,6 +158,11 @@ export async function runStartupChecks(
         "Looking for: .tila/config.toml (searched from cwd upward)",
     );
   }
+
+  // An explicit --instance must be provably this project's deployment, else
+  // nothing is sent (managed runs already refuse a mismatch above). Runs before
+  // the local backend opens, credentials resolve or a client is built.
+  if (!managed) await assertExplicitInstanceTarget(config);
 
   // Step 1.5: Backend mode
   const backendMode = config.backend ?? "cloudflare";
