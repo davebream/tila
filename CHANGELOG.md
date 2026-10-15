@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Task `data` is now limited to 256 KiB, measured as the UTF-8 byte length of its JSON (`MAX_TASK_DATA_BYTES`, 262,144 bytes). Creating a task, or updating one so that its merged data exceeds the limit, answers `413 payload-too-large` with `retryable: false`; data exactly at the limit is accepted. Clients that stored larger task data must trim it: a task already over the limit can only be updated to something strictly smaller. Records keep their 64 KiB bound. There are no migrations (#519).
+
 ### Fixed
+
+- Creating a relationship to a task that does not exist, for any relationship type, answers `404 not-found` naming the missing id with `retryable: false`, instead of a retryable `500 internal` from the foreign key. `from_id` is checked first. Valid requests, duplicates and the `parent-child` leaf rejection are unchanged (#519).
+- Creating a task with very large data, such as a 16 MiB field, answers `413 payload-too-large` before the write instead of a retryable `500` from SQLite (#519).
 
 - Data commands (`task`, `record`, `artifact` and the others that act on the project in the current directory) no longer ignore an explicit `--instance`. They run only when that instance is registered, trusted and is the Worker of the current directory's project (and `--project`, when given, names that project); otherwise they stop with `invalid-argument` before any credential is read or request is sent. Without `--instance` nothing changes. `tila project destroy` and `tila disconnect` apply the same check before reading credentials or deleting anything; `tila project destroy <slug>` accepts `--instance` only when it is the Worker saved in `~/.tila/infra.toml`. To act on another instance's project, run from that project's directory (#522).
 - Project commands run at a terminal on a host whose OS keychain cannot be read (no Secret Service, locked, or daemon down) no longer stop with `KEYCHAIN_UNAVAILABLE` before reading `.tila/.env`. The unreadable keychain counts as no remembered login, as it does without a terminal: the CLI prints one token-free warning on stderr (a structured diagnostic with `--json`) and continues with the file token or GitHub exchange. `--token`, exported tokens and a readable login keep their precedence, and a corrupt or mismatched stored login still fails (#522).
