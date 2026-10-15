@@ -172,6 +172,16 @@ const seqsShown = () =>
     .filter((text) => /^#\d+$/.test(text))
     .map((text) => Number(text.slice(1)));
 
+// A replay page can take longer than Testing Library's one-second default to
+// render when the full package suite runs in parallel. Wait for the completed
+// row count, then verify every sequence once so a real hole still fails.
+async function expectRenderedRange(from: number, through: number) {
+  await waitFor(() => expect(seqsShown()).toHaveLength(through - from + 1), {
+    timeout: 15_000,
+  });
+  expect(seqsShown()).toEqual(range(from, through));
+}
+
 const loadOlderButton = () =>
   screen.getByRole("button", { name: "Load older" });
 const noLoadOlder = () =>
@@ -369,18 +379,18 @@ describe("JournalPage older history", () => {
       // +400 events: the tail grows to its cap (500), nothing pruned yet.
       journal.head = 1400;
       pollOnce();
-      await waitFor(() => expect(seqsShown()).toEqual(range(701, 1400)));
+      await expectRenderedRange(701, 1400);
 
       // +400 more: the tail prunes 100 rows at a time, its first row climbing
       // from 901 to 1301. Those rows must move to history, not vanish.
       journal.head = 1800;
       pollOnce();
-      await waitFor(() => expect(seqsShown()).toEqual(range(701, 1800)));
+      await expectRenderedRange(701, 1800);
 
       // And again, from the new boundary.
       journal.head = 2200;
       pollOnce();
-      await waitFor(() => expect(seqsShown()).toEqual(range(701, 2200)));
+      await expectRenderedRange(701, 2200);
 
       expect(screen.queryByText(/sit between this history/)).toBeNull();
       // Every request after the first older page only extended the top edge
@@ -403,7 +413,7 @@ describe("JournalPage older history", () => {
       // The bottom edge is untouched by all of it: Load older continues
       // exactly below what was loaded first.
       await user.click(loadOlderButton());
-      await waitFor(() => expect(seqsShown()).toEqual(range(501, 2200)));
+      await expectRenderedRange(501, 2200);
       expect(journal.replay.at(-1)).toMatchObject({ after: 500, through: 700 });
     });
 
@@ -442,7 +452,7 @@ describe("JournalPage older history", () => {
 
       // 1100 -> 900: now within what closes on its own, so the rest does.
       await loadTrimmed();
-      await waitFor(() => expect(seqsShown()).toEqual(range(701, 2500)));
+      await expectRenderedRange(701, 2500);
       expect(screen.queryByText(/sit between this history/)).toBeNull();
       expect(
         screen.queryByRole("button", { name: "Load trimmed events" }),
