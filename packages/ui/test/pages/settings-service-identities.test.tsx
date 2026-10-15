@@ -311,10 +311,10 @@ test("editing a binding that limits record reads and writes separately keeps bot
   const drawer = await screen.findByRole("dialog", {
     name: /Workload bindings · CI bot/,
   });
-  // The list says what the binding may read and write.
+  // The list says what the binding may read and write, down to the prefix.
   expect(
     await within(drawer).findByText(
-      /records read: answer · records write: question/,
+      /records read: answer\/a1 · records write: question\/q1/,
     ),
   ).toBeInTheDocument();
   await user.click(
@@ -323,12 +323,19 @@ test("editing a binding that limits record reads and writes separately keeps bot
     }),
   );
   const form = within(drawer).getByRole("form", { name: "Policy of deploy" });
-  // Shown, not editable as a list that could be saved back as unrestricted.
-  const records = within(form).getByRole("textbox", {
-    name: /Limit to records/,
-  });
-  expect(records).toBeDisabled();
-  expect(records).toHaveValue("read: answer/a1\nwrite: question/q1");
+  // Each side is its own list, and the effective access is stated.
+  expect(
+    within(form).getByRole("combobox", { name: /Record access/ }),
+  ).toHaveValue("separate");
+  expect(
+    within(form).getByRole("textbox", { name: /Records it may read/ }),
+  ).toHaveValue("answer/a1");
+  expect(
+    within(form).getByRole("textbox", { name: /Records it may write/ }),
+  ).toHaveValue("question/q1");
+  expect(
+    within(form).getByRole("status", { name: "Effective record access" }),
+  ).toHaveTextContent("Reads: answer/a1 · Writes: question/q1");
 
   await user.selectOptions(
     within(form).getByRole("combobox", { name: /Role ceiling/ }),
@@ -344,6 +351,123 @@ test("editing a binding that limits record reads and writes separately keeps bot
   expect(sent[0].body).toMatchObject({
     expected_revision: 1,
     policy: { role: "viewer", restrictions },
+  });
+});
+
+test("editing one record side of a binding saves the other side untouched", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ workload_bindings_manage: true }));
+  // The read side is left out, so it denies; it must stay out when only the
+  // write list is changed, and an empty prefix list on a rule must survive.
+  const restrictions = {
+    records_write: [
+      { type: "question", key_prefixes: ["q1"] },
+      { type: "draft", key_prefixes: [] },
+    ],
+  };
+  const api = servicesApi({
+    bindings: [
+      () =>
+        HttpResponse.json({
+          ok: true,
+          bindings: [
+            {
+              ...binding,
+              policy: {
+                role: "participant",
+                capabilities: CREDENTIAL_PRESETS.worker.capabilities,
+                restrictions,
+              },
+            },
+          ],
+        }),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Workload bindings of ci-bot" }),
+  );
+  const drawer = await screen.findByRole("dialog", {
+    name: /Workload bindings · CI bot/,
+  });
+  await user.click(
+    await within(drawer).findByRole("button", {
+      name: "Edit policy of deploy",
+    }),
+  );
+  const form = within(drawer).getByRole("form", { name: "Policy of deploy" });
+  const write = within(form).getByRole("textbox", {
+    name: /Records it may write/,
+  });
+  expect(write).toHaveValue("question/q1\ndraft (no keys)");
+  expect(
+    within(form).getByRole("textbox", { name: /Records it may read/ }),
+  ).toHaveValue("");
+  await user.clear(write);
+  await user.type(write, "question/q2");
+  await user.click(within(form).getByRole("button", { name: "Save policy" }));
+
+  expect(
+    await within(drawer).findByText(/Saved the policy of deploy/),
+  ).toBeInTheDocument();
+  const sent = writes(api.sent);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].body).toMatchObject({
+    policy: {
+      restrictions: {
+        records_write: [{ type: "question", key_prefixes: ["q2"] }],
+      },
+    },
+  });
+  const body = sent[0].body as { policy: { restrictions: object } };
+  expect(body.policy.restrictions).not.toHaveProperty("records_read");
+  expect(body.policy.restrictions).not.toHaveProperty("records");
+});
+
+test("saving an untouched binding that denies all records keeps the deny", async () => {
+  const user = userEvent.setup();
+  server.use(sessionStatusWith({ workload_bindings_manage: true }));
+  const api = servicesApi({
+    bindings: [
+      () =>
+        HttpResponse.json({
+          ok: true,
+          bindings: [
+            {
+              ...binding,
+              policy: {
+                role: "participant",
+                capabilities: CREDENTIAL_PRESETS.worker.capabilities,
+                restrictions: { records: [] },
+              },
+            },
+          ],
+        }),
+    ],
+  });
+  renderPage();
+  await user.click(
+    await screen.findByRole("button", { name: "Workload bindings of ci-bot" }),
+  );
+  const drawer = await screen.findByRole("dialog", {
+    name: /Workload bindings · CI bot/,
+  });
+  await user.click(
+    await within(drawer).findByRole("button", {
+      name: "Edit policy of deploy",
+    }),
+  );
+  const form = within(drawer).getByRole("form", { name: "Policy of deploy" });
+  await user.selectOptions(
+    within(form).getByRole("combobox", { name: /Role ceiling/ }),
+    "viewer",
+  );
+  await user.click(within(form).getByRole("button", { name: "Save policy" }));
+  expect(
+    await within(drawer).findByText(/Saved the policy of deploy/),
+  ).toBeInTheDocument();
+  expect(writes(api.sent)[0].body).toMatchObject({
+    policy: { role: "viewer", restrictions: { records: [] } },
   });
 });
 
