@@ -670,6 +670,38 @@ describe("OverviewPage lifecycle coverage", () => {
     expect(note).not.toHaveTextContent("No lifecycle is declared");
   });
 
+  test("a credential that may write records but read none is not offered record counts", async () => {
+    useScenario(scenario("S1 large custom"));
+    let asked = false;
+    server.use(
+      http.get("*/projects/*/records/_types", () => {
+        asked = true;
+        return HttpResponse.json({ ok: true, types: [], entries: [] });
+      }),
+    );
+    identity([...CAPABILITIES], { records_write: [{ type: "note" }] });
+    renderOverview();
+
+    await screen.findByText(/302 tasks in 2 types/);
+    expect(asked).toBe(false);
+    expect(
+      screen.queryByRole("link", { name: "Open records" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a credential that may read some records is offered them", async () => {
+    useScenario(scenario("S1 large custom"));
+    identity([...CAPABILITIES], {
+      records_read: [{ type: "config", key_prefixes: ["team"] }],
+      records_write: [],
+    });
+    renderOverview();
+
+    expect(
+      await screen.findByRole("link", { name: "Open records" }),
+    ).toHaveAttribute("href", "/p/test-project/records");
+  });
+
   test("a records-only restriction does not claim task types are hidden", async () => {
     useScenario({
       ...scenario("S3 failed hotfix"),
