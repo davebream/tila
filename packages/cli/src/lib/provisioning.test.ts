@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { parseSchemaToml } from "@tila/core";
+import { LIFECYCLE_OUTCOMES } from "@tila/schemas";
 import { describe, expect, it, vi } from "vitest";
 
 // Mock child_process.execSync
@@ -8,9 +11,12 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Import after mock
-const { deriveRepo, generateRawToken, verifyD1TokenChecksum } = await import(
-  "./provisioning"
-);
+const {
+  deriveRepo,
+  generateDefaultSchemaToml,
+  generateRawToken,
+  verifyD1TokenChecksum,
+} = await import("./provisioning");
 
 // ---------------------------------------------------------------------------
 // Cross-runtime parity fixture (same as Worker token-format.test.ts Task 1)
@@ -110,6 +116,37 @@ describe("verifyD1TokenChecksum", () => {
   it("never throws — arbitrary garbage input returns a valid result", () => {
     expect(() => verifyD1TokenChecksum("garbage!!!")).not.toThrow();
     expect(verifyD1TokenChecksum("garbage!!!")).toBe("not-d1-token");
+  });
+});
+
+describe("generateDefaultSchemaToml", () => {
+  const parse = (toml: string) => {
+    const result = parseSchemaToml(toml);
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    return result.schema;
+  };
+
+  it("declares a terminal state for every lifecycle outcome", () => {
+    const task = parse(generateDefaultSchemaToml()).work_units.task;
+    const lifecycle = task.lifecycle;
+    expect(lifecycle?.field).toBe("status");
+    expect(Object.keys(lifecycle?.outcomes ?? {}).sort()).toEqual(
+      [...LIFECYCLE_OUTCOMES].sort(),
+    );
+    for (const state of Object.values(lifecycle?.outcomes ?? {})) {
+      expect(lifecycle?.terminal).toContain(state);
+    }
+    expect(task.fields.outcome).toBeUndefined();
+  });
+
+  it("declares the same task as the repository's bundled tila.schema.toml", () => {
+    const bundled = readFileSync(
+      new URL("../../../../tila.schema.toml", import.meta.url),
+      "utf8",
+    );
+    expect(parse(generateDefaultSchemaToml()).work_units.task).toEqual(
+      parse(bundled).work_units.task,
+    );
   });
 });
 
