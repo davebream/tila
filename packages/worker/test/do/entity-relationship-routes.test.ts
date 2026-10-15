@@ -50,7 +50,7 @@ afterEach(() => {
 // Helper: seed an entity and relationships via the route layer
 // ---------------------------------------------------------------------------
 
-async function createRelationship(
+async function postRelationship(
   fromId: string,
   toId: string,
   type: string,
@@ -60,6 +60,19 @@ async function createRelationship(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from_id: fromId, to_id: toId, type, actor: "test" }),
   });
+}
+
+/** Creates the relationship between two tasks that exist, as a client must. */
+async function createRelationship(
+  fromId: string,
+  toId: string,
+  type: string,
+): Promise<Response> {
+  for (const id of [fromId, toId]) {
+    const res = await createEntity(id);
+    expect([200, 409]).toContain(res.status);
+  }
+  return postRelationship(fromId, toId, type);
 }
 
 async function createEntity(id: string, type = "task"): Promise<Response> {
