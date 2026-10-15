@@ -46,6 +46,12 @@ export interface TaskFilters {
   blocked: boolean;
   /** Only tasks in the state their type's lifecycle names for an outcome. */
   outcome: LifecycleOutcome[];
+  /**
+   * Only tasks in one of these states: the value of each type's lifecycle
+   * field, or `status` for a type with no lifecycle. This is the value the
+   * State column shows.
+   */
+  state: string[];
 }
 
 const isOutcome = (value: string): value is LifecycleOutcome =>
@@ -57,12 +63,13 @@ export function taskFiltersFromSearch(params: URLSearchParams): TaskFilters {
     archived: params.get("archived") === "1",
     blocked: params.get("blocked") === "1",
     outcome: list(params.get("outcome")).filter(isOutcome),
+    state: list(params.get("state")),
   };
 }
 
 /** Task filters where the attention filters may be left out. */
 export type TaskFilterInput = Pick<TaskFilters, "type" | "archived"> &
-  Partial<Pick<TaskFilters, "blocked" | "outcome">>;
+  Partial<Pick<TaskFilters, "blocked" | "outcome" | "state">>;
 
 /** The task list API's filter parameters; sort and paging are separate. */
 export function taskListParams(filters: TaskFilterInput) {
@@ -71,6 +78,7 @@ export function taskListParams(filters: TaskFilterInput) {
     archived: filters.archived ? undefined : "0",
     blocked: filters.blocked ? ("1" as const) : undefined,
     outcome: filters.outcome?.length ? filters.outcome : undefined,
+    state: filters.state?.length ? filters.state : undefined,
   };
 }
 

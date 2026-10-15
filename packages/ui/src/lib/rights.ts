@@ -1,5 +1,10 @@
 import type { Capability, WhoamiResponse, WorkAttempt } from "@tila/schemas";
-import { permitsRecord, permitsTask } from "@tila/schemas";
+import {
+  permitsRecordRead,
+  permitsRecordTypeSide,
+  permitsRecordWrite,
+  permitsTask,
+} from "@tila/schemas";
 
 /**
  * What the current credential may attempt in this project. These only decide
@@ -47,14 +52,28 @@ export function rights(identity: WhoamiResponse | undefined, project: string) {
       has("templates:instantiate") &&
       types.every((type) => permitsTask(restrictions, type)),
     linkTasks: taskWrite,
-    /** Without a key: whether any key of `type` may be written. */
+    /**
+     * Whether the credential may write a record. Without a key: whether some
+     * key of `type` may be written, which is what a create or a type-level
+     * control means. Uses the write side only, so a credential that cannot
+     * read a record may still be offered a write to it.
+     */
     writeRecord: (type: string, key?: string) =>
       write &&
       has("records:write") &&
       (key === undefined
-        ? restrictions?.records === undefined ||
-          restrictions.records.some((rule) => rule.type === type)
-        : permitsRecord(restrictions, type, key)),
+        ? permitsRecordTypeSide(restrictions, "write", type)
+        : permitsRecordWrite(restrictions, type, key)),
+    /**
+     * Whether the credential may read a record, on the read side only. Without
+     * a key: whether some key of `type` may be read. A credential that may
+     * write a key but not read it must not be offered a way to open it.
+     */
+    readRecord: (type: string, key?: string) =>
+      has("records:read") &&
+      (key === undefined
+        ? permitsRecordTypeSide(restrictions, "read", type)
+        : permitsRecordRead(restrictions, type, key)),
     /** Any write the questions API may accept from this credential. */
     decide: taskWrite,
     /** Register, edit and archive agents (maintainer, `agents:manage`). */
