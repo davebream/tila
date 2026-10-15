@@ -112,6 +112,8 @@ it("reads one consistent revision and fence across writes, archive and unarchive
   const metaResponse = await request("/records/config/svc/api?meta=1");
   const metaText = await metaResponse.text();
   expect(metaResponse.status, metaText).toBe(200);
+  // No cache may answer a read used to validate a copy or learn the fence.
+  expect(metaResponse.headers.get("Cache-Control")).toBe("private, no-store");
   expect(metaText).not.toContain(SECRET);
   expect(metaText).not.toContain("runtime-tag-secret");
   const meta = JSON.parse(metaText) as Meta;
@@ -254,6 +256,11 @@ it("gives a write-only or out-of-prefix credential the ordinary read's denial", 
   const allowed = await as(readAnswers)("/records/answer/a1/x?meta=1");
   const allowedText = await allowed.text();
   expect(allowed.status, allowedText).toBe(200);
+  expect(allowed.headers.get("Cache-Control")).toBe("private, no-store");
+  // The ordinary read of the same key keeps the scoped-response header.
+  const ordinary = await as(readAnswers)("/records/answer/a1/x");
+  expect(ordinary.headers.get("Cache-Control")).toBe("no-store");
+  await ordinary.text();
   expect(JSON.parse(allowedText)).toMatchObject({
     ok: true,
     meta: { type: "answer", key: "a1/x", revision: 1 },
