@@ -5,6 +5,7 @@ import {
   RecordMutateResponseSchema,
   RecordWriteReceiptResponseSchema,
   RecordWriteResponseSchema,
+  type RecordWriteResult,
   isRecordWriteReceipt,
 } from "../src";
 
@@ -66,6 +67,34 @@ describe("record write responses", () => {
       record: { value: {} },
     });
     expect(parsed).toEqual(receipt);
+  });
+
+  it("treats `receipt: true` as authoritative over stored fields riding along", () => {
+    // A response that is both flagged a receipt and shaped like a full record
+    // must come back as the receipt, with the stored state stripped: the flag
+    // is the server saying this caller may not read it.
+    const hybrid = {
+      ...receipt,
+      record: full.record,
+      revision: full.revision,
+    };
+    const parsed = RecordWriteResponseSchema.parse(hybrid);
+    expect(parsed).toEqual(receipt);
+    expect(isRecordWriteReceipt(parsed)).toBe(true);
+  });
+
+  it("tells a backend receipt from a flat row (RecordWriteResult)", () => {
+    const row: RecordWriteResult = { ...full.record, fence: 4 };
+    const asReceipt: RecordWriteResult = receipt;
+
+    expect(isRecordWriteReceipt(row)).toBe(false);
+    expect(isRecordWriteReceipt(asReceipt)).toBe(true);
+
+    const results: RecordWriteResult[] = [row, asReceipt];
+    const revisions = results.map((r) =>
+      isRecordWriteReceipt(r) ? null : r.revision,
+    );
+    expect(revisions).toEqual([2, null]);
   });
 
   it("rejects a response with neither shape", () => {

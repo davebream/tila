@@ -325,6 +325,168 @@ describe("tila record set", () => {
 
     expect(mockPostFormData).not.toHaveBeenCalled();
   });
+
+  describe("full row (readable or local credential)", () => {
+    it("create prints the revision and fence of the stored row", async () => {
+      mockCreateRecord.mockResolvedValue(recordRow({ revision: 1, fence: 1 }));
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        json: false,
+      });
+
+      expect(logSpy.mock.calls).toEqual([
+        ["Set record service/api (rev 1, fence 1)"],
+      ]);
+    });
+
+    it("--fence prints the new revision and fence", async () => {
+      mockSetRecord.mockResolvedValue(recordRow({ revision: 5, fence: 9 }));
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        fence: "8",
+        json: false,
+      });
+
+      expect(logSpy.mock.calls).toEqual([
+        ["Set record service/api (rev 5, fence 9)"],
+      ]);
+    });
+
+    it("--json keeps the whole row, including revision and value", async () => {
+      const row = recordRow({ value: { name: "test" }, revision: 2, fence: 6 });
+      mockSetRecord.mockResolvedValue(row);
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        fence: "5",
+        json: true,
+      });
+
+      const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+      expect(output.ok).toBe(true);
+      expect(output.result).toEqual(row);
+    });
+  });
+
+  describe("write receipt (write-only credential)", () => {
+    const receipt = {
+      ok: true,
+      receipt: true,
+      type: "service",
+      key: "api",
+      fence: 4,
+    };
+
+    it("create reports success with the fence and no invented revision", async () => {
+      mockCreateRecord.mockResolvedValue(receipt);
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        json: false,
+      });
+
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const line = logSpy.mock.calls[0][0] as string;
+      expect(line).toContain("Set record service/api");
+      expect(line).toContain("fence 4");
+      expect(line).not.toMatch(/\brev\b|revision \d|undefined|NaN/);
+    });
+
+    it("--fence reports success with the new fence and no revision", async () => {
+      mockSetRecord.mockResolvedValue({ ...receipt, fence: 9 });
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        fence: "8",
+        json: false,
+      });
+
+      expect(exitSpy).not.toHaveBeenCalled();
+      const line = logSpy.mock.calls[0][0] as string;
+      expect(line).toContain("Set record service/api");
+      expect(line).toContain("fence 9");
+      expect(line).not.toMatch(/\brev\b|revision \d|undefined|NaN/);
+    });
+
+    it("--json exposes the receipt discriminant and nothing stored", async () => {
+      mockCreateRecord.mockResolvedValue(receipt);
+
+      const cmd = await loadCommand();
+      await runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        json: true,
+      });
+
+      const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+      expect(output.ok).toBe(true);
+      expect(output.result).toEqual({
+        receipt: true,
+        type: "service",
+        key: "api",
+        fence: 4,
+      });
+      expect(output.result).not.toHaveProperty("revision");
+      expect(output.result).not.toHaveProperty("value");
+    });
+
+    it("does not read the record back after the write", async () => {
+      mockCreateRecord.mockResolvedValue(receipt);
+      mockSetRecord.mockResolvedValue(receipt);
+
+      const cmd = await loadCommand();
+      const set = getSubCommand(cmd, "set");
+      const base = {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        json: false,
+      };
+      await runCmd(set, base);
+      await runCmd(set, { ...base, fence: "3" });
+
+      expect(mockGetRecord).not.toHaveBeenCalled();
+      expect(mockListRecords).not.toHaveBeenCalled();
+      expect(mockListRecordHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a rejected write is an error: nothing is printed as success", async () => {
+    mockSetRecord.mockRejectedValue(new Error("stale-fence: fence is stale"));
+
+    const cmd = await loadCommand();
+    await expect(
+      runCmd(getSubCommand(cmd, "set"), {
+        type: "service",
+        key: "api",
+        file: "/tmp/value.json",
+        fence: "1",
+        json: false,
+      }),
+    ).rejects.toThrow(/stale-fence/);
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
