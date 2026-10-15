@@ -469,6 +469,7 @@ export function insertSnapshotRows(
 export function finalizeSnapshotRestore(
   sql: ProjectSqlStorage,
   journalNextSequence: number,
+  keepApplying = false,
 ): void {
   if (tableExists(sql, "sqlite_sequence")) {
     sql.exec("DELETE FROM sqlite_sequence WHERE name = 'journal'");
@@ -479,9 +480,10 @@ export function finalizeSnapshotRestore(
   }
   rebuildSearchIndexes(sql);
   sql.exec("PRAGMA defer_foreign_keys = OFF");
-  sql.exec(
-    "UPDATE _project_transfer_state SET applying = 0 WHERE singleton = 1",
-  );
+  if (!keepApplying)
+    sql.exec(
+      "UPDATE _project_transfer_state SET applying = 0 WHERE singleton = 1",
+    );
 }
 
 export function rebuildSearchIndexes(sql: ProjectSqlStorage): void {
@@ -635,8 +637,14 @@ export function retargetTransfer(
       "Import session does not match the active lock",
     );
   }
+  if (state.mode === "rollback" && state.archive_digest === archiveDigest)
+    return;
   sql.exec(
-    "UPDATE _project_transfer_state SET mode = 'rollback', archive_digest = ?, updated_at = ? WHERE singleton = 1",
+    "DELETE FROM _project_transfer_chunks WHERE session_id = ?",
+    sessionId,
+  );
+  sql.exec(
+    "UPDATE _project_transfer_state SET mode = 'rollback', archive_digest = ?, updated_at = ?, applying = 0 WHERE singleton = 1",
     archiveDigest,
     now,
   );

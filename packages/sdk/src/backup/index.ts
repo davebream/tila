@@ -1412,7 +1412,7 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
   const objects = parseJsonl(
     scanned.data.get("objects.jsonl"),
   ) as unknown as ProjectBackupObject[];
-  const spoolRoot = `${options.archive}.restore-${sessionId}`;
+  const spoolRoot = `${options.archive}.restore-${sessionId}-${randomUUID()}`;
   await mkdir(spoolRoot, { recursive: true });
   try {
     const extract = tar.extract();

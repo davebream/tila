@@ -87,10 +87,12 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       sessionId: string;
       archiveDigest: string;
     }>();
-    projectTransferOps.retargetTransfer(
-      sql,
-      body.sessionId,
-      body.archiveDigest,
+    deps.ctx.storage.transactionSync(() =>
+      projectTransferOps.retargetTransfer(
+        sql,
+        body.sessionId,
+        body.archiveDigest,
+      ),
     );
     return c.json({ ok: true });
   });
@@ -191,15 +193,18 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       !state ||
       state.session_id !== body.sessionId ||
       state.mode === "export"
-    ) {
+    )
       return jsonError(
         c,
         "transfer-conflict",
         "Import session does not match the active lock",
         409,
       );
-    }
-    projectTransferOps.finalizeSnapshotRestore(sql, body.journalNextSequence);
+    projectTransferOps.finalizeSnapshotRestore(
+      sql,
+      body.journalNextSequence,
+      true,
+    );
     const actual = await projectTransferOps.semanticDigest(
       sql,
       body.migrationVersion ?? 34,
