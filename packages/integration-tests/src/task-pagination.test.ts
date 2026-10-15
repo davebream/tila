@@ -194,6 +194,7 @@ describe("task pagination through Worker and DO", () => {
       excluded_kinds: [
         { kind: "artifact", reason: "restricted" },
         { kind: "record", reason: "capability" },
+        { kind: "report", reason: "restricted" },
       ],
     });
 

@@ -181,3 +181,5 @@ export * as queueBackupOps from "./queue-backup-ops";
 export * as questionOps from "./question-ops";
 export * as customJournalOps from "./custom-journal-ops";
 export { JournalReportError } from "./custom-journal-ops";
+
+export * as reportSearchOps from "./report-search-ops";

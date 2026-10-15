@@ -7,9 +7,12 @@ import {
   type RequestOrigin,
   artifactOps,
   constraintOps,
+  readCredentialPolicy,
   relationshipOps,
+  reportSearchOps,
   resolveArtifactResource,
   searchDriftOps,
+  searchPageOps,
   searchReindexOps,
 } from "@tila/ops-sqlite";
 import { parseTagFilter } from "@tila/schemas";
@@ -17,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError, z } from "zod";
 import type { ReindexState } from "../project-do";
+import { scheduleReportIndex } from "../report-search-job";
 import { scheduleArtifactPublication } from "./artifact-alarm";
 import { lifecycleStore } from "./artifact-lifecycle-routes";
 import { originFromBody } from "./origin";
@@ -528,15 +532,40 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
   app.post("/search/reindex", async (c) => {
     const { ctx } = deps;
     const body = (await c.req.json().catch(() => ({}))) as {
-      kind?: "artifact" | "entity";
+      kind?: "artifact" | "entity" | "report";
     };
 
+    if (body.kind === "report") {
+      try {
+        searchPageOps.searchableKinds(
+          readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+          ["report"],
+        );
+      } catch {
+        return jsonError(
+          c,
+          403,
+          "permission-denied",
+          "Credential does not permit report indexing",
+        );
+      }
+      const projectId = c.req.query("project_id");
+      if (!projectId)
+        return jsonError(c, 400, "validation-error", "project_id is required");
+      await scheduleReportIndex(deps, projectId, true);
+      return c.json({
+        ok: true,
+        status: "started",
+        kind: "report",
+        report_history: reportSearchOps.reportHistoryScope(deps.db),
+      });
+    }
     if (body.kind !== "artifact" && body.kind !== "entity") {
       return jsonError(
         c,
         400,
         "validation-error",
-        "kind must be 'artifact' or 'entity'",
+        "kind must be 'artifact', 'entity' or 'report'",
       );
     }
 
@@ -565,6 +594,28 @@ export function createArtifactRoutes(deps: RouterDeps): ProjectSubRouter {
   // GET /search/reindex/status -- check reindex job progress
   app.get("/search/reindex/status", async (c) => {
     const { ctx } = deps;
+    if (c.req.query("kind") === "report") {
+      try {
+        searchPageOps.searchableKinds(
+          readCredentialPolicy(c.req.header("X-Tila-Credential-Policy")),
+          ["report"],
+        );
+      } catch {
+        return jsonError(
+          c,
+          403,
+          "permission-denied",
+          "Credential does not permit report indexing status",
+        );
+      }
+      const report_history = reportSearchOps.reportHistoryScope(deps.db);
+      return c.json({
+        ok: true,
+        kind: "report",
+        status: report_history.status,
+        report_history,
+      });
+    }
     const state = await ctx.storage.get<ReindexState>("_reindex_state");
 
     if (!state) {

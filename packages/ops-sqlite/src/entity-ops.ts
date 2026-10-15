@@ -1161,10 +1161,7 @@ export function searchEntities(
   }
 }
 
-export type UnifiedSearchResult =
-  | ({ type: "entity" } & EntitySearchResult)
-  | ({ type: "artifact" } & ArtifactSearchResult)
-  | ({ type: "record" } & RecordSearchResult);
+export type UnifiedSearchResult = import("@tila/schemas").UnifiedSearchResult;
 
 /**
  * Unified full-text search across entities, artifacts, and records.

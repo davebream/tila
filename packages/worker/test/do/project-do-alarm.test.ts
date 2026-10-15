@@ -31,13 +31,17 @@ describe("ProjectDO.alarm", () => {
       sql: {
         exec: vi.fn().mockReturnValue({ toArray: () => [] }),
       },
-      get: vi.fn().mockResolvedValue({
-        kind: "artifact",
-        batchSize: 50,
-        processed: 100,
-        attempts: 99,
-        startedAt: Date.now() - 60_000,
-      }),
+      get: vi.fn(async (key: string) =>
+        key === "_reindex_state"
+          ? {
+              kind: "artifact",
+              batchSize: 50,
+              processed: 100,
+              attempts: 99,
+              startedAt: Date.now() - 60_000,
+            }
+          : undefined,
+      ),
       put: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
       setAlarm: vi.fn().mockResolvedValue(undefined),

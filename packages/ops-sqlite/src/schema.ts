@@ -1081,3 +1081,25 @@ export const questionReceipts = sqliteTable("question_receipts", {
     .notNull(),
   created_at: integer("created_at").notNull(),
 });
+
+// Reports remain searchable after journal rows move into archive storage.
+export const reportSearchDocs = sqliteTable("report_search_docs", {
+  seq: integer("seq").primaryKey(),
+  t: integer("t").notNull(),
+  resource: text("resource").notNull(),
+  principal_id: text("principal_id").notNull(),
+  event_name: text("event_name").notNull(),
+  correlation_id: text("correlation_id"),
+  corrects_seq: integer("corrects_seq"),
+  body_text: text("body_text").notNull(),
+  indexed_at: integer("indexed_at").notNull(),
+});
+
+export const reportSearchState = sqliteTable("report_search_state", {
+  id: integer("id").primaryKey(),
+  status: text("status").notNull(),
+  indexed_through_seq: integer("indexed_through_seq").notNull(),
+  target_through_seq: integer("target_through_seq").notNull(),
+  generation: text("generation").notNull(),
+  error: text("error"),
+});

@@ -159,3 +159,27 @@ describe("embedded filtered journal replay", () => {
     expect(reentry.changes.events.map((event) => event.seq)).toEqual([1, 2]);
   });
 });
+
+it("searches nested archived report text through the embedded backfill", async () => {
+  append(1, "custom.reported", {
+    event_name: "pipeline.old",
+    event_version: 1,
+    target: { kind: "project" },
+    data: { deep: ["embeddedneedle"] },
+  });
+  await archive(1);
+  expect(
+    project.searchPage({ q: "embeddedneedle", kinds: ["report"] }).scope
+      ?.report_history?.status,
+  ).toBe("pending");
+  expect(await project.indexReportHistoryBatch()).toMatchObject({
+    status: "complete",
+  });
+  expect(
+    project.searchPage({ q: "embeddedneedle", kinds: ["report"] }).results,
+  ).toMatchObject([{ type: "report", seq: 1 }]);
+  expect(project.searchAll({ q: "embeddedneedle" })).toMatchObject([
+    { type: "report", seq: 1 },
+  ]);
+  expect(await project.reindexReports()).toMatchObject({ status: "complete" });
+});

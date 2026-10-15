@@ -1156,6 +1156,8 @@ function createLocalSearchMethods(project: EmbeddedProject) {
       q: string,
       opts?: SearchOptions,
     ): Promise<UnifiedSearchResponse> {
+      if (!opts?.kind || opts.kind.includes("report"))
+        await project.indexReportHistoryBatch();
       return project.searchPage({
         q,
         limit: opts?.limit,

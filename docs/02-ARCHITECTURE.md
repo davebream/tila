@@ -292,7 +292,7 @@ Beyond the four data shapes, tila ships five coordination primitives that operat
 - **Gates.** Approval and quality gates that govern work-unit transitions. A work unit cannot leave a state without all required gates being satisfied. Gates emit journal events on satisfaction.
 - **Signals.** Lightweight notifications distinct from journal events. Targets are canonical participants, principals, principal-based groups, or the active broadcast audience. Each send snapshots immutable participant deliveries; inboxes and acknowledgements are authorized by the caller's exact principal/participant pair. Display names and environment fields are retained only as audit metadata. Acknowledged deliveries remain through expiry, when the signal and all deliveries are swept together.
 - **Presence.** TTL'd machine activity for "who's online and on what."
-- **Search.** Lexical full-text search (FTS5) across indexed artifact content. Searchable kinds are declared in `tila.schema.toml`.
+- **Search.** Lexical full-text search (FTS5) across tasks, records, configured artifact content, and journal reports (including archived reports). Artifact searchability is declared in `tila.schema.toml`.
 
 The data shapes are what state lives in. The coordination primitives are how agents and humans serialize access to that state.
 
@@ -3359,7 +3359,7 @@ corpus and may drift under concurrent writes. Each kind stops at depth 1000.
 
 | Parameter | Meaning |
 |---|---|
-| `kind` | Comma list of `task`, `record`, `artifact`. Defaults to every kind the caller may read. Task results carry `type: "entity"` |
+| `kind` | Comma list of `task`, `record`, `artifact`, `report`. Defaults to every kind the caller may read. Task results carry `type: "entity"` |
 | `type` | Comma list of task or record types. Requires exactly one `task` or `record` kind |
 | `syntax` | `fts` (default): FTS5 query syntax. `literal`: plain words, each quoted, the last prefix-matched |
 | `cursor` | `next_cursor` from the previous page |
@@ -3374,14 +3374,26 @@ corpus and may drift under concurrent writes. Each kind stops at depth 1000.
   prefix matches many tasks. Title matches still rank first.
 - **Scope is explicit.** `scope.kinds` lists the kinds searched and
   `scope.excluded_kinds` the ones left out, with a reason: `capability` (a
-  scoped credential lacks `tasks:read`, `records:read` or `artifacts:read`) or
-  `restricted` (namespace-restricted credentials never search artifacts).
+  scoped credential lacks `tasks:read`, `records:read`, `artifacts:read` or
+  `journal:read`) or
+  `restricted` (namespace-restricted credentials never search artifacts or
+  free-form reports).
   Asking for an excluded kind explicitly returns 403. Archived tasks and records
   never match (`scope.archived: "excluded"`).
 - **Restricted credentials can search.** Exact `/search` is allowed for
   namespace-restricted credentials; tasks and records are filtered by the same
   restriction conditions as lists. `/search/reindex` stays denied.
 - `total` is the number of results in the page, not a match count.
+
+Report results carry `type: "report"` and a journal `seq`; replay retrieves the
+original immutable event. Migration 44 retains report search documents across
+archival and backfills existing history in verified windows. Search includes
+report metadata and nested payload string values, with originals and corrections
+remaining separate results. `scope.report_history` reports archived inclusion,
+indexing status, and verified/target sequences; partial results remain usable
+without claiming complete history. New reports index in the append transaction.
+See [Journal report search](06-SEARCH.md#journal-report-search) for permissions,
+client commands, retry behavior, and recovery.
 
 ### 14.9 Dashboard navigation and Overview (#306)
 

@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { SearchKindSchema } from "@tila/schemas";
 import type { TilaFacade } from "tila-sdk";
 import { z } from "zod";
 import { toMcpError } from "../errors";
@@ -298,8 +299,13 @@ export function registerArtifactTools(
   registerPrimitiveTool(
     server,
     "tila_search",
-    "Unified full-text search across tasks and artifacts. Use this for general discovery when you don't know whether the match is a task or an artifact. Each result is tagged by type — `entity` (a task) or `artifact`.",
+    "Unified full-text search across tasks, records, artifacts and reports, including archived reports. Results carry a type; report results identify a journal sequence retrievable with replay. Follow next_cursor for another page. scope.report_history reports incomplete or failed historical indexing.",
     {
+      kind: z
+        .array(SearchKindSchema)
+        .optional()
+        .describe("Kinds to search; omitted searches every permitted kind"),
+      cursor: z.string().optional().describe("Continue from next_cursor"),
       q: z.string().min(1).describe("Search query string"),
       limit: z
         .number()
@@ -315,10 +321,12 @@ export function registerArtifactTools(
           'AND filter: return only results with ALL listed facet-namespaced tags (e.g. ["repo:tila","team:platform"]).',
         ),
     },
-    async ({ q, limit, tag_filter }) => {
+    async ({ q, limit, tag_filter, kind, cursor }) => {
       try {
         const result = await search.search(q, {
           limit,
+          ...(kind ? { kind } : {}),
+          ...(cursor ? { cursor } : {}),
           ...(tag_filter?.length ? { tagFilter: tag_filter } : {}),
         });
         return {

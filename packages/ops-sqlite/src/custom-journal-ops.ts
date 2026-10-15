@@ -25,6 +25,7 @@ import {
 } from "./fence-ops";
 import type { RequestOrigin } from "./journal-ops";
 import type { ProjectDatabase } from "./queue-internals";
+import { indexReport } from "./report-search-ops";
 import * as schema from "./schema";
 
 export class JournalReportError extends Error {
@@ -386,6 +387,7 @@ export async function appendReport(
       }),
       dedup_expires_at: now + CUSTOM_REPORT_RETENTION_MS,
     });
+    indexReport(tx, response.event);
     tx.insert(schema.journalReportReceipts)
       .values({
         key,

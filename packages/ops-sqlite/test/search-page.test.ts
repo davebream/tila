@@ -25,7 +25,9 @@ function ids(results: ReturnType<typeof searchPage>["results"]): string[] {
       ? r.entity_id
       : r.type === "record"
         ? `${r.record_type}/${r.record_key}`
-        : r.r2_key,
+        : r.type === "report"
+          ? String(r.seq)
+          : r.r2_key,
   );
 }
 
@@ -279,7 +281,7 @@ describe("searchableKinds", () => {
   it("searches every kind without a scoped policy", () => {
     expect(searchableKinds(undefined, undefined)).toEqual({
       restricted: false,
-      kinds: ["task", "artifact", "record"],
+      kinds: ["task", "artifact", "record", "report"],
     });
   });
 
@@ -295,6 +297,7 @@ describe("searchableKinds", () => {
       excluded_kinds: [
         { kind: "artifact", reason: "capability" },
         { kind: "record", reason: "capability" },
+        { kind: "report", reason: "capability" },
       ],
     });
   });
@@ -310,6 +313,7 @@ describe("searchableKinds", () => {
       excluded_kinds: [
         { kind: "artifact", reason: "restricted" },
         { kind: "record", reason: "capability" },
+        { kind: "report", reason: "restricted" },
       ],
     });
     expect(() => searchableKinds(policy, ["artifact"])).toThrow(
