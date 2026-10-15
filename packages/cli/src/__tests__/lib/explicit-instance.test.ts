@@ -2,6 +2,7 @@ import type { InstanceKey, InstanceRecord } from "@tila/schemas";
 import { describe, expect, it, vi } from "vitest";
 import {
   ExplicitInstanceTargetError,
+  assertExplicitInstanceIsInfraWorker,
   assertExplicitInstanceTarget,
 } from "../../lib/explicit-instance";
 
@@ -185,5 +186,66 @@ describe("assertExplicitInstanceTarget", () => {
     await expect(
       assertExplicitInstanceTarget(baseConfig, { instance: "a-key" }, store),
     ).rejects.toThrow("registry unreadable");
+  });
+});
+
+describe("assertExplicitInstanceIsInfraWorker", () => {
+  const target = { workerUrl: A_URL, slug: "proj-a" };
+
+  it("is a no-op without --instance and never reads the registry", async () => {
+    const store = registry();
+    await assertExplicitInstanceIsInfraWorker(target, {}, store);
+    await assertExplicitInstanceIsInfraWorker(
+      target,
+      { project: "something-else" },
+      store,
+    );
+    expect(store.getInstance).not.toHaveBeenCalled();
+  });
+
+  it("accepts the instance whose Worker is the infra Worker", async () => {
+    const store = registry(record("a-key", A_URL));
+    await expect(
+      assertExplicitInstanceIsInfraWorker(target, { instance: "a-key" }, store),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses another instance instead of treating --instance as a selector", async () => {
+    const store = registry(record("a-key", A_URL), record("b-key", B_URL));
+    const error = await refusal(
+      assertExplicitInstanceIsInfraWorker(target, { instance: "b-key" }, store),
+    );
+    expect(error.code).toBe("invalid-argument");
+    expect(error.message).toContain("different deployment");
+    expect(error.message).toContain("infra.toml");
+  });
+
+  it("refuses an unknown or untrusted instance", async () => {
+    await refusal(
+      assertExplicitInstanceIsInfraWorker(
+        target,
+        { instance: "ghost" },
+        registry(),
+      ),
+    );
+    await refusal(
+      assertExplicitInstanceIsInfraWorker(
+        target,
+        { instance: "a-key" },
+        registry(record("a-key", A_URL, false)),
+      ),
+    );
+  });
+
+  it("refuses --project that is not the slug being destroyed", async () => {
+    const store = registry(record("a-key", A_URL));
+    const error = await refusal(
+      assertExplicitInstanceIsInfraWorker(
+        target,
+        { instance: "a-key", project: "proj-b" },
+        store,
+      ),
+    );
+    expect(error.message).toContain('--project "proj-b"');
   });
 });

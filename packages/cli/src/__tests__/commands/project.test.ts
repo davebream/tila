@@ -204,6 +204,7 @@ import configureCmd from "../../commands/project/configure";
 import createCmd from "../../commands/project/create";
 import destroyCmd from "../../commands/project/destroy";
 import listCmd from "../../commands/project/list";
+import { resetGlobalFlags, setGlobalFlags } from "../../lib/global-flags";
 import { LocalProject } from "../../local";
 
 const mockLocalProjectOpen = vi.mocked(LocalProject.open);
@@ -861,6 +862,65 @@ describe("tila project destroy", () => {
     mockFindConfig.mockReturnValue(null);
 
     await expect(invokeProjectDestroy()).rejects.toThrow("process.exit(1)");
+  });
+
+  // An explicit --instance must be provably the deployment destroy would act on.
+  // The mocked fs hides any registry, so the instance is unregistered here; the
+  // guard's accept/refuse rules are covered in explicit-instance.test.ts and the
+  // spawned CLI tests. These pin the wiring: refusal precedes everything else.
+  describe("with an explicit --instance", () => {
+    afterEach(() => {
+      resetGlobalFlags();
+    });
+
+    function expectNothingReadOrDestroyed() {
+      expect(mockResolveCfApiToken).not.toHaveBeenCalled();
+      expect(mockCreateCloudflareClient).not.toHaveBeenCalled();
+      expect(mockReadFileSync).not.toHaveBeenCalled();
+      expect(mockText).not.toHaveBeenCalled();
+      expect(mockWipeProjectViaWorker).not.toHaveBeenCalled();
+      expect(mockWipeProjectViaInfraToken).not.toHaveBeenCalled();
+      expect(mockCleanD1NonTokenRecords).not.toHaveBeenCalled();
+      expect(mockDeleteD1TokenRecord).not.toHaveBeenCalled();
+      expect(mockCleanLocalFiles).not.toHaveBeenCalled();
+    }
+
+    it("local plan: refuses before any credential read, prompt, wipe or delete", async () => {
+      setGlobalFlags({ instance: "b-key" });
+
+      await expect(invokeProjectDestroy({ force: false })).rejects.toThrow(
+        /unknown instance "b-key"/i,
+      );
+
+      expectNothingReadOrDestroyed();
+    });
+
+    it("local plan: refuses a local project", async () => {
+      mockFindConfig.mockReturnValue(LOCAL_CONFIG);
+      setGlobalFlags({ instance: "b-key" });
+
+      await expect(invokeProjectDestroy()).rejects.toThrow(/local project/);
+
+      expectNothingReadOrDestroyed();
+    });
+
+    it("infra slug plan: --instance is verified against infra.toml, never a selector", async () => {
+      mockFindConfig.mockReturnValue(null);
+      mockLoadInfraConfig.mockReturnValue({
+        account_id: "acct-infra",
+        account_name: "Infra Account",
+        d1_database_id: "d1-infra",
+        worker_url: "https://tila-infra.workers.dev",
+      });
+      vi.stubEnv("INFRA_ADMIN_TOKEN", "infra-secret");
+      setGlobalFlags({ instance: "b-key" });
+
+      await expect(
+        invokeProjectDestroy({ slug: "remote-proj" }),
+      ).rejects.toThrow(/unknown instance "b-key"/i);
+
+      expectNothingReadOrDestroyed();
+    });
   });
 
   // Infra-owner destroy by slug: no local .tila/, target resolved from infra.toml

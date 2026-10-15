@@ -36,6 +36,7 @@ const root = mkdtempSync(join(tmpdir(), "tila-explicit-instance-"));
 const home = join(root, "home");
 const projectA = join(root, "project-a");
 const projectLocal = join(root, "project-local");
+const projectDestroy = join(root, "project-destroy");
 const localDb = join(projectLocal, "state.db");
 const entry = resolve(import.meta.dirname, "../index.ts");
 
@@ -132,6 +133,20 @@ beforeAll(async () => {
   mkdirSync(home, { recursive: true });
   mkdirSync(join(projectA, ".tila"), { recursive: true });
   writeFileSync(join(projectA, ".tila/config.toml"), config(a.url, "proj-a"));
+  mkdirSync(join(projectDestroy, ".tila"), { recursive: true });
+  writeFileSync(
+    join(projectDestroy, ".tila/config.toml"),
+    config(a.url, "proj-destroy"),
+  );
+  writeFileSync(
+    join(projectDestroy, ".tila/.env"),
+    "TILA_API_TOKEN=destroy-token\n",
+  );
+  // Infra-owner destroy by slug acts on the Worker saved here: instance A's.
+  writeFileSync(
+    join(home, "infra.toml"),
+    `account_id = "acct"\naccount_name = "Acct"\nd1_database_id = "d1"\nworker_url = "${a.url}"\n`,
+  );
   mkdirSync(join(projectLocal, ".tila"), { recursive: true });
   writeFileSync(
     join(projectLocal, ".tila/config.toml"),
@@ -281,6 +296,80 @@ describe("explicit --instance is refused before any request unless provably the 
       }),
       /different deployment/,
     );
+  });
+});
+
+describe("project destroy with an explicit --instance", () => {
+  const destroyKept = () => [
+    existsSync(join(projectDestroy, ".tila/config.toml")),
+    existsSync(join(projectDestroy, ".tila/.env")),
+  ];
+
+  it("local plan: cwd bound to A, --instance B wipes and deletes nothing", async () => {
+    const result = await invoke(
+      ["--instance", "b-key", "project", "destroy", "--force", "--json"],
+      { cwd: projectDestroy },
+    );
+    expectRefusedBeforeAnyRequest(result, /different deployment/);
+    expect(destroyKept()).toEqual([true, true]);
+  });
+
+  it("local plan: refuses an unregistered instance without deleting", async () => {
+    const result = await invoke(
+      ["--instance", "ghost", "project", "destroy", "--force", "--json"],
+      { cwd: projectDestroy },
+    );
+    expectRefusedBeforeAnyRequest(result, /unknown instance/i);
+    expect(destroyKept()).toEqual([true, true]);
+  });
+
+  it("local plan: refuses a local project's destroy under an explicit --instance", async () => {
+    const result = await invoke(
+      ["--instance", "a-key", "project", "destroy", "--force", "--json"],
+      { cwd: projectLocal },
+    );
+    expectRefusedBeforeAnyRequest(result, /local project/);
+    expect(existsSync(join(projectLocal, ".tila/config.toml"))).toBe(true);
+  });
+
+  it("infra slug plan: --instance B is not a selector and wipes nothing on A", async () => {
+    const result = await invoke(
+      [
+        "--instance",
+        "b-key",
+        "project",
+        "destroy",
+        "some-slug",
+        "--force",
+        "--json",
+      ],
+      { cwd: projectDestroy },
+    );
+    expectRefusedBeforeAnyRequest(result, /different deployment/);
+    expect(result.stderr).toContain("infra.toml");
+    expect(destroyKept()).toEqual([true, true]);
+  });
+
+  it("infra slug plan: accepts the instance that is infra.toml's Worker (control)", async () => {
+    // With no INFRA_ADMIN_TOKEN the destroy stops right after the guard.
+    const result = await invoke(
+      [
+        "--instance",
+        "a-key",
+        "project",
+        "destroy",
+        "some-slug",
+        "--force",
+        "--json",
+      ],
+      { cwd: projectDestroy },
+    );
+    const output = result.stdout + result.stderr;
+    expect(result.status).toBe(1);
+    expect(output).toContain("INFRA_ADMIN_TOKEN");
+    expect(output).not.toContain("different deployment");
+    expect(a.requests).toEqual([]);
+    expect(b.requests).toEqual([]);
   });
 });
 
