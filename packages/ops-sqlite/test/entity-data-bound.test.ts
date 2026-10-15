@@ -101,6 +101,13 @@ describe("create", () => {
     });
     expect(error.message).toContain(String(MAX_TASK_DATA_BYTES));
   });
+
+  it("keeps the class name the MCP server maps local errors by", () => {
+    // tila-mcp-server's recoveryFor recognises this error by `name`.
+    expect(new TaskDataTooLargeError(MAX_TASK_DATA_BYTES + 1).name).toBe(
+      "TaskDataTooLargeError",
+    );
+  });
 });
 
 describe("update", () => {
