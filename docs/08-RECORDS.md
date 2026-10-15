@@ -1373,7 +1373,9 @@ the response above, unchanged.
   that may only write the key, or whose read rules do not admit it, gets the
   same `403 permission-denied` as for `get`, whether or not the record exists.
   A missing record is the same `404 not-found` as for `get`.
-- There is no `ETag`, conditional request or `304` form.
+- The response is sent `Cache-Control: private, no-store`, and the Worker's
+  cache layer never serves or stores it, so a stale revision or fence cannot
+  come from a cache. There is no `ETag`, conditional request or `304` form.
 - Keys with slashes are encoded per segment, as for `get`.
 
 SDK: `records.meta(type, key)` returns `RecordMetaResponse`
