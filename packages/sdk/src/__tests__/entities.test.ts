@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TilaClient } from "../client";
 import { createTaskMethods } from "../entities";
+import { TILA_ERRORS } from "../error-codes";
+import { TilaApiError } from "../errors";
+import { withRetry } from "../retry";
 
 /**
  * Path/params/body guards for the task HTTP methods that must line up with the
@@ -157,5 +160,73 @@ describe("createTaskMethods — outgoing request shape", () => {
         tasks().list({ outcome: outcome as never }),
       ).rejects.toThrow();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Two input errors the Worker used to answer as a retryable 500: task data past
+ * the size bound and a relationship to a task that does not exist. Each now
+ * arrives as a typed, non-retryable error, so a retrying caller stops at once.
+ */
+describe("createTaskMethods — refusals are not retried", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function refusal(status: number, code: string, message: string) {
+    return new Response(
+      JSON.stringify({ ok: false, error: { code, message, retryable: false } }),
+      { status, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  function tasks() {
+    const client = new TilaClient({ baseUrl: "https://api.test", token: "t" });
+    return createTaskMethods(client, "proj-1");
+  }
+
+  it("surfaces an oversized create as payload-too-large and does not retry", async () => {
+    mockFetch.mockResolvedValue(
+      refusal(413, "payload-too-large", "Task data is 300000 bytes"),
+    );
+
+    const error = await withRetry(
+      () => tasks().create("T-1", "task", { description: "x" }),
+      { baseDelayMs: 0, jitter: false },
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(TilaApiError);
+    expect(error).toMatchObject({
+      code: TILA_ERRORS.PAYLOAD_TOO_LARGE,
+      status: 413,
+      retryable: false,
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a relationship to a missing task as not-found and does not retry", async () => {
+    mockFetch.mockResolvedValue(
+      refusal(404, "not-found", "Entity T-missing not found"),
+    );
+
+    const error = await withRetry(
+      () => tasks().addRelationship("T-1", "T-missing", "blocks"),
+      { baseDelayMs: 0, jitter: false },
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(TilaApiError);
+    expect(error).toMatchObject({
+      code: TILA_ERRORS.NOT_FOUND,
+      status: 404,
+      retryable: false,
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
