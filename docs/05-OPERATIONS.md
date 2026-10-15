@@ -579,9 +579,14 @@ with another credential.
 Async project startup checks the managed-runtime guard first, then the flag and
 environment credentials. Without those overrides, an interactive human session
 can precede the file or GitHub exchange when `worker_url` is set, CI is unset and
-stdin is a TTY. Async GitHub mode accepts the same flag/env overrides; synchronous
-GitHub resolution retains its cached-session behavior and otherwise requires
-async resolution. The legacy file is not a GitHub-mode override.
+stdin is a TTY. If the OS keychain cannot be read (no Secret Service, locked, or
+daemon down), the lookup counts as no remembered login: stderr gets one
+token-free warning (a structured diagnostic with `--json`) and resolution
+continues to the file or GitHub exchange. A stored login that is corrupt or bound
+to another instance still fails the command. Async GitHub mode accepts the same
+flag/env overrides; synchronous GitHub resolution retains its cached-session
+behavior and otherwise requires async resolution. The legacy file is not a
+GitHub-mode override.
 
 ### Migrating from D1 Tokens
 
