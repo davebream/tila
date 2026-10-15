@@ -749,7 +749,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/whoami` | — | `{ token_name, scopes }` |
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
-| GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
+| GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `state`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `state`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
 | GET | `/search` | query: `q`, `kind`, `type`, `syntax`, `limit`, `cursor`, `tag_filter` | `{ results: [], total, next_cursor, scope }` — `total` counts this page (§14.8) |
 | GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
 | POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` — `data` is limited to 256 KiB (§14.10) |
@@ -3258,6 +3258,23 @@ many rows share a timestamp. With a `limit`, the response carries an opaque
 - Migration 35 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
   indexes. `title` and `status` sorts read `data.title` and `data.status`
   directly (not presentation metadata) and are not indexed.
+- **State filter and sort (#525).** A task's state is the string in its type's
+  declared lifecycle field, or in `status` when the type declares no lifecycle
+  (or is not declared at all). A missing, blank or non-string value is no
+  state. This is the value the dashboard shows in its State column, so
+  `GET /tasks?state=in-review,done` and `sort=state` agree with it for every
+  type, including types whose lifecycle field is not `status`. The `status`
+  filter and `sort=status` are unchanged and still read `data.status` only.
+  `state` is a comma list matched exactly (case and spacing included); a task
+  with no state matches none and sorts first ascending, last descending, with
+  ties broken by `id`. A blank entry is `400 validation-error`. Fields are
+  matched by exact key, as readiness does, and the type-to-field map is bound
+  as one JSON object, so the statement stays under the Durable Object SQLite
+  100-value cap however many types declare a lifecycle. The cursor is bound to
+  the state list, the sort and that map: changing any of them, including a
+  schema change that moves a lifecycle field, returns `400 invalid-cursor`.
+  The sort is not indexed. Search results carry no state, so the dashboard
+  disables its State control in search mode.
 - **Page size.** Without `limit`, every matching task comes back in one response
   (`limit: null`, `next_cursor: null`); send a `limit` to page. A `limit` above
   500 is served as 500 and the response echoes the effective value. The per-page
@@ -3408,13 +3425,13 @@ links to always agree.
 
 `blocked`, `outcome`, `wake` and `expires_after` are bound to list cursors, so a
 cursor issued for one filter is rejected under another. The SDK exposes task
-`blocked?: boolean` and `outcome?: LifecycleOutcome[]` filters over HTTP and local
-Node/Bun backends. `tasks.list` preserves entities plus the exact total, limit,
+`blocked?: boolean`, `outcome?: LifecycleOutcome[]` and `state?: string[]`
+filters, and `sort: "state"`, over HTTP and local Node/Bun backends. `tasks.list` preserves entities plus the exact total, limit,
 offset, has_more, next_cursor and scope (including outcome_types). Existing
 array-returning `EntityBackend.list` remains compatible; optional `listPage`
 supplies metadata without reconstructing totals from a page. CLI `task list`
 accepts `--blocked`, `--outcome` and `--cursor`; MCP `tila_task_list` accepts the
-same filters and paging options. Local SDK lists still return full entities
+same filters, plus `state`, `sort` and `order`, and paging options. Local SDK lists still return full entities
 when compact is requested. Third-party array-only backends report unsupported
 metadata explicitly and cannot silently ignore attention filters or cursors.
 

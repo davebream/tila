@@ -363,6 +363,8 @@ export async function listTasks(
     cursor?: string;
     blocked?: "1";
     outcome?: string[];
+    /** Task states: each type's lifecycle field, else `status`. */
+    state?: string[];
   },
 ): Promise<EntityListResponse | PaginatedEntityListResponse> {
   const stringParams: Record<string, string | undefined> = {};
@@ -386,6 +388,7 @@ export async function listTasks(
   if (params?.cursor) stringParams.cursor = params.cursor;
   if (params?.blocked) stringParams.blocked = params.blocked;
   if (params?.outcome?.length) stringParams.outcome = params.outcome.join(",");
+  if (params?.state?.length) stringParams.state = params.state.join(",");
   return request<EntityListResponse | PaginatedEntityListResponse>(
     projectId,
     "/tasks",
@@ -399,6 +402,7 @@ export type TaskListSort =
   | "type"
   | "title"
   | "status"
+  | "state"
   | "id";
 
 /** Every task type the caller may read, with counts and declared definitions. */
