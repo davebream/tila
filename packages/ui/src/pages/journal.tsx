@@ -3,6 +3,7 @@ import {
   JournalReportForm,
   ProjectReportDetails,
 } from "@/components/journal-report";
+import { ReportPayloadRow } from "@/components/journal-report-payload";
 import { AuthorAffix } from "@/components/ui/author-affix";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 const MAX_ROWS = 500;
+// Seq, recorded, kind, resource, actor, data toggle: rows spanning the table.
+const EVENT_COLUMNS = 6;
 const PRUNE_COUNT = 100;
 const PAGE_SIZE = 100;
 
@@ -313,9 +316,16 @@ const EventRow = memo(function EventRow({ event }: { event: JournalEvent }) {
           )}
         </TableCell>
       </TableRow>
+      {event.kind === "custom.reported" && (
+        <ReportPayloadRow
+          seq={event.seq}
+          data={event.data}
+          colSpan={EVENT_COLUMNS}
+        />
+      )}
       {hasData && dataOpen && (
         <TableRow>
-          <TableCell colSpan={6} className="p-0">
+          <TableCell colSpan={EVENT_COLUMNS} className="p-0">
             <pre className="overflow-x-auto bg-card p-2 text-xs text-foreground whitespace-pre-wrap break-all">
               {JSON.stringify(event.data, null, 2)}
             </pre>
