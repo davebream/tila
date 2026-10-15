@@ -28,9 +28,21 @@ hljs.registerLanguage("css", css);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("html", xml);
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const renderer = new marked.Renderer();
 renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
-  const langClass = lang ? ` language-${lang}` : "";
+  // The info string is author text: only its first word names the language,
+  // and it is escaped so it cannot leave the class attribute.
+  const language = lang?.match(/^\S+/)?.[0];
+  const langClass = language ? ` language-${escapeHtml(language)}` : "";
   return `<pre class="tila-codeblock"><code class="hljs${langClass}">${text}</code></pre>`;
 };
 
