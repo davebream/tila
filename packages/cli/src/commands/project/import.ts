@@ -8,7 +8,10 @@ import {
 } from "tila-sdk/backup";
 import { requireTokenAsync } from "../../auth";
 import { findConfig } from "../../config";
-import { assertExplicitInstanceTarget } from "../../lib/explicit-instance";
+import {
+  assertExplicitInstanceTarget,
+  assertNoExplicitInstanceForLocal,
+} from "../../lib/explicit-instance";
 import { printJson } from "../../lib/output";
 import * as p from "../../lib/prompts";
 import { tilaHome } from "../../lib/provisioning";
@@ -67,9 +70,12 @@ export default defineCommand({
   async run({ args }) {
     if (!existsSync(args.archive))
       throw new Error(`Backup archive does not exist: ${args.archive}`);
-    const initial = await inspectProjectBackup(args.archive);
+    // An explicit --instance is verified (or refused) before the archive is
+    // read or any destination, remote or local, is touched.
     const config = findConfig();
     if (config) await assertExplicitInstanceTarget(config);
+    else if (args.local) assertNoExplicitInstanceForLocal();
+    const initial = await inspectProjectBackup(args.archive);
     const existing = config !== null;
     if (existing && !args.replace && !args.resume && !args.rollback) {
       throw new Error("The destination already exists; pass --replace");

@@ -176,3 +176,18 @@ export async function assertExplicitInstanceIsInfraWorker(
   );
   assertProjectFlag(flags, target.slug, INFRA_WORKER);
 }
+
+/**
+ * A command that would create or use a local project when no project config
+ * exists has no instance to verify --instance against, so an explicit key
+ * would be silently ignored. Refuse it before anything local is written.
+ */
+export function assertNoExplicitInstanceForLocal(
+  flags: Pick<GlobalFlags, "instance"> = getGlobalFlags(),
+): void {
+  if (flags.instance === undefined) return;
+  throw new ExplicitInstanceTargetError(
+    `--instance ${JSON.stringify(flags.instance)} cannot be combined with --local: a local project has no instance.`,
+    "Omit --instance to create a local project, or run from the instance's project directory.",
+  );
+}
