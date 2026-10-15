@@ -6,11 +6,15 @@ import {
   PROJECT_ROLE_RANK,
   type ProjectRole,
   RESTRICTED_CREDENTIAL_SURFACES,
+  type RecordAccessSide,
+  canEchoStoredRecord,
   capabilityRole,
   effectiveCredentialPolicy,
   hasNamespaceRestrictions,
-  permitsRecord,
+  isReadMethod,
+  permitsRecordSide,
   permitsTask,
+  recordResourceTarget,
 } from "@tila/schemas";
 import type { Context, MiddlewareHandler } from "hono";
 import { forwardToDO } from "../lib/do-forward";
@@ -54,6 +58,65 @@ export function scopedPolicy(c: Context<AppEnv>): CredentialPolicy | undefined {
 const RESTRICTED_SURFACE = new RegExp(
   `^/(${RESTRICTED_CREDENTIAL_SURFACES.join("|")})(/|$)`,
 );
+
+/**
+ * Which side of a record namespace a `/records` request exercises. The table
+ * is enumerated rather than inferred from the verb: only GET reads, every
+ * mutation is a write, and `PATCH` and `~/archive` / `~/unarchive` also return
+ * the stored row, so they need the read side of the same key as well.
+ * Anything else has no entry and is denied.
+ */
+export function recordRouteAccess(
+  method: string,
+  operation: string | undefined,
+): { side: RecordAccessSide; echoesStored: boolean } | undefined {
+  if (isReadMethod(method)) return { side: "read", echoesStored: false };
+  if (method === "PUT") return { side: "write", echoesStored: false };
+  if (method === "PATCH") return { side: "write", echoesStored: true };
+  if (method === "POST")
+    return {
+      side: "write",
+      echoesStored: operation === "archive" || operation === "unarchive",
+    };
+  return undefined;
+}
+
+/**
+ * The record resource a `/claims` request names, with the side it exercises.
+ * Task resources are left to the DO, which resolves them against stored state.
+ * A malformed resource parameter is returned as-is so the caller denies it.
+ */
+async function recordClaimResource(
+  c: Context<AppEnv>,
+  path: string,
+): Promise<{ resource: string; side: RecordAccessSide } | undefined> {
+  const state = /^\/claims\/state\/(.+)$/.exec(path);
+  if (state && isReadMethod(c.req.method)) {
+    let resource: string;
+    try {
+      resource = decodeURIComponent(state[1]);
+    } catch {
+      return { resource: "record:", side: "read" };
+    }
+    return resource.startsWith("record:")
+      ? { resource, side: "read" }
+      : undefined;
+  }
+  if (
+    c.req.method === "POST" &&
+    /^\/claims\/(?:acquire|renew|release)$/.test(path)
+  ) {
+    const body = (await c.req.raw
+      .clone()
+      .json()
+      .catch(() => ({}))) as { resource?: unknown };
+    return typeof body.resource === "string" &&
+      body.resource.startsWith("record:")
+      ? { resource: body.resource, side: "write" }
+      : undefined;
+  }
+  return undefined;
+}
 
 export function routeCapability(
   method: string,
@@ -407,13 +470,37 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
                 .json()
                 .catch(() => ({}))) as Record<string, unknown>);
         let key: unknown = parts.length ? parts.join("/") : body?.key;
-        if (parts[0] === "~") key = parts.slice(2).join("/");
+        let operation: string | undefined;
+        if (parts[0] === "~") {
+          operation = parts[1];
+          key = parts.slice(2).join("/");
+        }
+        const access = recordRouteAccess(c.req.method, operation);
+        if (access === undefined) return denied(c);
         if (
           typeof key === "string" &&
-          !permitsRecord(policy.restrictions, type, key)
+          (!permitsRecordSide(policy.restrictions, access.side, type, key) ||
+            (access.echoesStored && !canEchoStoredRecord(policy, type, key)))
         )
           return denied(c);
         if (body?.source_artifact_key) return denied(c);
+      }
+      // Claims on a record take the side of the operation: acquiring, renewing
+      // and releasing write it, reading its state reads it. The DO repeats the
+      // check, and filters the claim listing by the read side.
+      const claimResource = await recordClaimResource(c, path);
+      if (claimResource !== undefined) {
+        const target = recordResourceTarget(claimResource.resource);
+        if (
+          target === undefined ||
+          !permitsRecordSide(
+            policy.restrictions,
+            claimResource.side,
+            target.type,
+            target.key,
+          )
+        )
+          return denied(c);
       }
       // The listed surfaces cannot safely project their cross-resource data.
       // Exact `/search` filters each kind inside the DO (#300).

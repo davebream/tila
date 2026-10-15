@@ -8,10 +8,11 @@
 // deterministic for an unchanged corpus, and pages may drift under concurrent
 // writes (documented). Multi-kind pages interleave kinds round-robin.
 
-import type {
-  NamespaceRestrictions,
-  SearchKind,
-  SearchScope,
+import {
+  type NamespaceRestrictions,
+  type SearchKind,
+  type SearchScope,
+  hasRecordRestrictions,
 } from "@tila/schemas";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import {
@@ -226,7 +227,7 @@ export function searchableKinds(
 ): Pick<SearchScope, "kinds" | "excluded_kinds" | "restricted"> {
   const restricted =
     policy?.restrictions?.task_types !== undefined ||
-    policy?.restrictions?.records !== undefined;
+    hasRecordRestrictions(policy?.restrictions);
   const wanted = SEARCH_KINDS.filter(
     (kind) => requested === undefined || requested.includes(kind),
   );
