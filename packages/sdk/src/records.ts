@@ -10,6 +10,7 @@ import type {
   RecordSetRequest,
   RecordTypesResponse,
   RecordUnarchiveRequest,
+  RecordWriteResponse,
 } from "@tila/schemas";
 import type { TilaClient } from "./client";
 
@@ -21,30 +22,37 @@ export function createRecordMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}/records`;
 
   return {
+    /**
+     * Creates a record. A credential that may write but not read the key
+     * receives a `RecordWriteReceiptResponse` (type, key and fence only)
+     * instead of the full record; narrow with `isRecordWriteReceipt`.
+     */
     async create(
       type: string,
       req: RecordCreateRequest,
-    ): Promise<RecordMutateResponse> {
-      return client.post<RecordMutateResponse>(`${base}/${type}`, req);
+    ): Promise<RecordWriteResponse> {
+      return client.post<RecordWriteResponse>(`${base}/${type}`, req);
     },
 
+    /** Replaces a record; the response is a receipt under the rule of `create`. */
     async set(
       type: string,
       key: string,
       req: RecordSetRequest,
-    ): Promise<RecordMutateResponse> {
-      return client.put<RecordMutateResponse>(
+    ): Promise<RecordWriteResponse> {
+      return client.put<RecordWriteResponse>(
         `${base}/${type}/${encodeKey(key)}`,
         req,
       );
     },
 
+    /** Create-or-replace; the response is a receipt under the rule of `create`. */
     async put(
       type: string,
       key: string,
       req: RecordPutRequest,
-    ): Promise<RecordMutateResponse> {
-      return client.post<RecordMutateResponse>(
+    ): Promise<RecordWriteResponse> {
+      return client.post<RecordWriteResponse>(
         `${base}/${type}/~/put/${encodeKey(key)}`,
         req,
       );

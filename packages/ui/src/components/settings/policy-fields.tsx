@@ -8,13 +8,27 @@ import {
   type CredentialPolicy,
   CredentialPolicySchema,
   ROOT_CAPABILITIES,
+  type RecordRestrictionRule,
+  RecordRestrictionRuleSchema,
 } from "@tila/schemas";
 import { z } from "zod";
+
+/**
+ * Record rules that limit reading and writing separately. The form cannot
+ * author them, so it carries them as they are and writes them back unchanged.
+ */
+const SplitRecords = z.object({
+  records_read: z.array(RecordRestrictionRuleSchema).optional(),
+  records_write: z.array(RecordRestrictionRuleSchema).optional(),
+});
+type SplitRecords = z.infer<typeof SplitRecords>;
 
 /**
  * A credential policy as the forms edit it: a preset or a custom role and
  * capability list, plus optional namespace restrictions written one per line.
  * Over-broad policies are left for the server to refuse with its own message.
+ * A policy that limits record reads and writes separately keeps those rules in
+ * `records_split` untouched; `records` is then empty and not editable.
  */
 export const PolicyForm = z.object({
   preset: z.string(),
@@ -22,6 +36,7 @@ export const PolicyForm = z.object({
   capabilities: z.array(z.string()),
   task_types: z.string(),
   records: z.string(),
+  records_split: SplitRecords.optional(),
 });
 export type PolicyForm = z.infer<typeof PolicyForm>;
 
@@ -53,6 +68,14 @@ export function presetForm(preset: Preset = "read-only"): PolicyForm {
 }
 
 export function policyToForm(policy: CredentialPolicy): PolicyForm {
+  const { records_read, records_write } = policy.restrictions ?? {};
+  const split: SplitRecords | undefined =
+    records_read === undefined && records_write === undefined
+      ? undefined
+      : {
+          ...(records_read === undefined ? {} : { records_read }),
+          ...(records_write === undefined ? {} : { records_write }),
+        };
   const preset =
     !policy.restrictions &&
     PRESETS.find(
@@ -72,7 +95,28 @@ export function policyToForm(policy: CredentialPolicy): PolicyForm {
           : rule.key_prefixes.map((prefix) => `${rule.type}/${prefix}`),
       )
       .join("\n"),
+    ...(split === undefined ? {} : { records_split: split }),
   };
+}
+
+/** One line per rule, prefixed by its side, for showing a split policy. */
+function splitRecordLines(split: SplitRecords): string {
+  const lines = (side: string, rules: RecordRestrictionRule[] | undefined) =>
+    rules === undefined || rules.length === 0
+      ? [`${side}: none`]
+      : rules.flatMap((rule) =>
+          rule.key_prefixes === undefined
+            ? [`${side}: ${rule.type}`]
+            : rule.key_prefixes.length === 0
+              ? [`${side}: ${rule.type} (no keys)`]
+              : rule.key_prefixes.map(
+                  (prefix) => `${side}: ${rule.type}/${prefix}`,
+                ),
+        );
+  return [
+    ...lines("read", split.records_read),
+    ...lines("write", split.records_write),
+  ].join("\n");
 }
 
 /** The policy a form describes; `problem` explains why it is invalid. */
@@ -80,6 +124,13 @@ export function formToPolicy(
   form: PolicyForm,
 ): { policy: CredentialPolicy; problem: null } | { problem: string } {
   const task_types = uniqueLines(form.task_types);
+  // A split policy is written back exactly as it was read. The two forms
+  // cannot be combined, so a record list next to it is refused, never merged.
+  if (form.records_split && uniqueLines(form.records).length > 0)
+    return {
+      problem:
+        "records: this policy limits record reads and writes separately; clear the record list",
+    };
   const rules = new Map<string, { whole: boolean; prefixes: string[] }>();
   for (const line of uniqueLines(form.records)) {
     const slash = line.indexOf("/");
@@ -97,6 +148,7 @@ export function formToPolicy(
   );
   const restrictions = {
     ...(task_types.length ? { task_types } : {}),
+    ...(form.records_split ? form.records_split : {}),
     ...(records.length ? { records } : {}),
   };
   const parsed = CredentialPolicySchema.safeParse({
@@ -125,6 +177,16 @@ export function policySummary(policy: CredentialPolicy): string {
     parts.push(
       `records: ${policy.restrictions.records.map((r) => r.type).join(", ")}`,
     );
+  const { records_read, records_write } = policy.restrictions ?? {};
+  if (records_read !== undefined || records_write !== undefined) {
+    // A side that is not listed denies every record, so say so.
+    const side = (rules: RecordRestrictionRule[] | undefined) =>
+      rules?.length ? rules.map((rule) => rule.type).join(", ") : "none";
+    parts.push(
+      `records read: ${side(records_read)}`,
+      `records write: ${side(records_write)}`,
+    );
+  }
   return parts.join(" · ");
 }
 
@@ -160,6 +222,9 @@ export function PolicyFields({
               ...presetForm(value as Preset),
               task_types: form.task_types,
               records: form.records,
+              ...(form.records_split
+                ? { records_split: form.records_split }
+                : {}),
             });
         }}
       />
@@ -212,16 +277,32 @@ export function PolicyFields({
         hint="Optional. One task type per line; empty allows every type."
         onChange={(e) => onChange({ ...form, task_types: e.target.value })}
       />
-      <TextAreaField
-        label="Limit to records"
-        rows={2}
-        className="font-mono text-xs"
-        spellCheck={false}
-        value={form.records}
-        disabled={disabled}
-        hint="Optional. One per line: a record type, or type/key-prefix. Empty allows every record."
-        onChange={(e) => onChange({ ...form, records: e.target.value })}
-      />
+      {form.records_split ? (
+        <TextAreaField
+          label="Limit to records"
+          rows={Math.max(
+            2,
+            splitRecordLines(form.records_split).split("\n").length,
+          )}
+          className="font-mono text-xs"
+          spellCheck={false}
+          value={splitRecordLines(form.records_split)}
+          disabled
+          readOnly
+          hint="This policy limits record reads and writes separately. It is kept exactly as it is when you save; change it with the CLI."
+        />
+      ) : (
+        <TextAreaField
+          label="Limit to records"
+          rows={2}
+          className="font-mono text-xs"
+          spellCheck={false}
+          value={form.records}
+          disabled={disabled}
+          hint="Optional. One per line: a record type, or type/key-prefix. Empty allows every record."
+          onChange={(e) => onChange({ ...form, records: e.target.value })}
+        />
+      )}
       {problem && (
         <p role="alert" className="text-sm text-status-red">
           {problem}

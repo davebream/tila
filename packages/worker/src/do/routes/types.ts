@@ -13,3 +13,10 @@ export type ProjectSubRouter = Hono;
 
 /** Context variable key for the sanitized correlation id threaded by the DO router. */
 export const CORRELATION_ID_KEY = "doCorrelationId";
+
+/**
+ * Context variable set by the DO router when a record write comes from a
+ * credential that may not read the record, so responses and errors drop the
+ * detail that would reveal stored state.
+ */
+export const WITHHOLD_RECORD_DETAIL_KEY = "doWithholdRecordDetail";
