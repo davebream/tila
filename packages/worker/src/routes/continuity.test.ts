@@ -12,7 +12,11 @@ const token: UnifiedTokenResult = {
   scopes: "full",
   tokenId: "token",
 };
-function setup(response: unknown = { ok: true }, scopes = "full") {
+function setup(
+  response: unknown = { ok: true },
+  scopes = "full",
+  env: Partial<Env> = {},
+) {
   const forwarded: Request[] = [];
   const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
   app.use("*", async (c, next) => {
@@ -37,7 +41,7 @@ function setup(response: unknown = { ok: true }, scopes = "full") {
         ...init,
         headers: { "X-Tila-Participant-Id": "session", ...init.headers },
       }),
-      {} as Env,
+      env as Env,
       {
         waitUntil: vi.fn(),
         passThroughOnException: vi.fn(),
@@ -137,6 +141,89 @@ describe("continuity authorization and forwarding", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       error: { code: "journal-history-unavailable" },
+    });
+  });
+  describe("filtered replay", () => {
+    const archived = (skip?: number) =>
+      Array.from({ length: 1000 }, (_, index) => index + 1)
+        .filter((seq) => seq !== skip)
+        .map((seq) =>
+          JSON.stringify({
+            seq,
+            t: seq,
+            kind: seq === 700 ? "custom.reported" : "task.created",
+            resource: "project",
+            actor: "actor",
+            data: seq === 700 ? { event_name: "pipeline.old" } : {},
+          }),
+        )
+        .join("\n");
+    const scan = {
+      after_seq: 0,
+      through_seq: 1500,
+      page_through_seq: 1000,
+      archived_through_seq: 1000,
+      events: [],
+      filter: { event_name: "pipeline.old", limit: 10 },
+    };
+    const bucket = (body: string) => {
+      const list = vi.fn(async () => ({
+        objects: [
+          {
+            key: "journal-archive/p/2025/01.part-1000-from-1.jsonl",
+            customMetadata: { first_seq: "1", last_seq: "1000" },
+          },
+        ],
+        truncated: false,
+      }));
+      const get = vi.fn(async () => ({ body: new Response(body).body }));
+      return { list, get, ARTIFACTS: { list, get } as unknown as R2Bucket };
+    };
+
+    it("forwards the filters and reads the archive once for the whole scan", async () => {
+      const { list, get, ARTIFACTS } = bucket(archived());
+      const { request, forwarded } = setup(scan, "full", { ARTIFACTS });
+      const response = await request(
+        "/journal/replay?after_seq=0&through_seq=1500&limit=10&event_name=pipeline.old",
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        events: [{ seq: 700, kind: "custom.reported" }],
+        next_after_seq: 1000,
+        through_seq: 1500,
+        has_more: true,
+      });
+      expect(forwarded).toHaveLength(1);
+      expect(new URL(forwarded[0].url).searchParams.get("event_name")).toBe(
+        "pipeline.old",
+      );
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed on a missing sequence even when the filter matches nothing", async () => {
+      const { ARTIFACTS } = bucket(archived(500));
+      const { request } = setup(
+        { ...scan, filter: { event_name: "no.such_event", limit: 10 } },
+        "full",
+        { ARTIFACTS },
+      );
+      const response = await request(
+        "/journal/replay?after_seq=0&through_seq=1500&event_name=no.such_event",
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: { code: "journal-history-unavailable", retryable: true },
+      });
+    });
+
+    it("rejects malformed selectors before reaching the Durable Object", async () => {
+      const { request, forwarded } = setup();
+      for (const query of ["event_name=Bad%20Name", "correlation_id="])
+        expect(
+          (await request(`/journal/replay?after_seq=0&${query}`)).status,
+        ).toBe(400);
+      expect(forwarded).toHaveLength(0);
     });
   });
 });

@@ -3853,10 +3853,36 @@ This guarantee does not provide unbounded exactly-once delivery.
 
 Live inspection supports indexed `event_name`, `correlation_id`, and existing
 resource filters. Archived ranges retain the explicit archive-boundary response;
-use bounded replay for older history. Replay remains complete and unfiltered,
-including custom reports. Acknowledging a sequence means processing that journal
+use replay for older history. Unfiltered replay remains complete, including
+custom reports. Acknowledging a sequence means processing that journal
 position, never acknowledging an external command. Inspection does not advance a
-consumer cursor. Handoffs/reentry reuse the same replay stream.
+consumer cursor. Handoffs/reentry reuse the same unfiltered replay stream.
+
+`GET /journal/replay` also takes `event_name` and `correlation_id`, which select
+`custom.reported` rows by exact value across live and archived history; both
+must match when both are given. A row without the field never matches, and the
+`custom.reported` kind is part of the match even though stored rows are not
+required to carry it. The filters never reach re-entry.
+
+A filtered request examines up to `JOURNAL_REPLAY_SCAN_BUDGET` (1000) sequences,
+five maximum-size pages, and `limit` caps the matches returned rather than the
+sequences examined. History for the whole examined range is merged and checked
+for missing or conflicting sequences before any row is filtered, so lost history
+fails with `journal-history-unavailable` (503) or `journal-history-conflict`
+(409) even when the filter matches nothing. The archive is read once per request,
+however many pages' worth of sequences it covers.
+
+`next_after_seq` reports what was actually examined: the end of the examined
+range, or the sequence of the last match when more matches than `limit` were
+found. `has_more` is `next_after_seq < through_seq`. A filtered page can be empty
+while `has_more` is true, so every client loops on `has_more`, never on page
+size, and resumes without skipping or repeating a sequence. Filtered replay is
+a lookup, not a consumer stream: acknowledging its `next_after_seq` would mark
+events the filter skipped as processed.
+
+Archive objects carry only sequence-range metadata, not names or correlation
+IDs, so an archived search streams every overlapping object. The durable index
+is a separate change; the request shape does not depend on it.
 
 Complete project backups preserve reports, identity, sequence, and receipt
 expiration; compatible older backups restore new tables empty. Local/embedded

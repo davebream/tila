@@ -5,6 +5,7 @@ import {
   artifactOps,
   coordinationOps,
   journalArchiveOps,
+  journalOps,
 } from "@tila/ops-sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { exportProjectBackup, importProjectBackup } from "../../backup";
@@ -72,6 +73,61 @@ describe("local continuity", () => {
       expect((await facade.journal.getCursor()).cursor.seq).toBe(0);
       await facade.journal.acknowledge({ seq: resumed.changes.next_after_seq });
       expect((await facade.reentry()).changes.events).toEqual([]);
+    } finally {
+      local.close();
+    }
+  });
+  it("filters replay over archived blobs and live rows, and still fails closed on lost history", async () => {
+    const opts = options();
+    const local = await createTilaLocal(opts);
+    try {
+      const db = local.project.getDb();
+      const report = (name: string, correlation: string) =>
+        db.transaction((tx) =>
+          journalOps.appendJournal(tx, {
+            kind: "custom.reported",
+            resource: "project",
+            actor: identity.principal_id,
+            principalId: identity.principal_id,
+            participantId: identity.participant_id,
+            environment: identity.environment,
+            data: {
+              event_name: name,
+              event_version: 1,
+              target: { kind: "project" },
+              data: {},
+              correlation_id: correlation,
+            },
+          }),
+        );
+      report("pipeline.old", "run-1");
+      report("pipeline.other", "run-2");
+      report("pipeline.live", "run-1");
+      const blobs = new NodeBlobStore(opts.artifactsPath);
+      const key = "journal-archive/project/2025/01.part-2-from-1.jsonl";
+      await blobs.write(
+        key,
+        journalArchiveOps
+          .getArchivableEvents(db)
+          .events.filter((row) => row.seq <= 2)
+          .map((row) => JSON.stringify(row))
+          .join("\n"),
+      );
+      journalArchiveOps.markArchived(db, 2);
+      const { journal } = buildLocalResources(local.project, local.artifacts);
+      const seqs = async (filter: object) =>
+        (await journal.replay({ after_seq: 0, ...filter })).events.map(
+          (event) => event.seq,
+        );
+      expect(await seqs({ event_name: "pipeline.old" })).toEqual([1]);
+      expect(await seqs({ correlation_id: "run-1" })).toEqual([1, 3]);
+      expect(
+        await journal.replay({ after_seq: 0, correlation_id: "run-2" }),
+      ).toMatchObject({ next_after_seq: 3, through_seq: 3, has_more: false });
+      await blobs.unlink(key);
+      await expect(seqs({ event_name: "no.such_event" })).rejects.toMatchObject(
+        { code: "journal-history-unavailable" },
+      );
     } finally {
       local.close();
     }
