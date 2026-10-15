@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { processIdentity } from "@tila/client-lifecycle";
 import type { RuntimeRunContext } from "@tila/schemas";
@@ -29,7 +29,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 function fixture(enabled = true) {
-  const root = mkdtempSync("/tmp/tila-herdr-wiring-");
+  const root = realpathSync(mkdtempSync("/tmp/tila-herdr-wiring-"));
   const store = new ConnectorStore(join(root, "connector"));
   const owner = processIdentity(process.pid);
   if (!owner) throw new Error("Fixture process identity unavailable");
