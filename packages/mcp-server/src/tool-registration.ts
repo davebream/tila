@@ -126,6 +126,7 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
     RecordNotFoundError: "not-found",
     EntityAlreadyExistsError: "entity-already-exists",
     EntityNotFoundError: "not-found",
+    TaskDataTooLargeError: "payload-too-large",
     LocalUnsupportedError: "unsupported-backend",
   };
   const localCode = cause instanceof Error ? localCodes[cause.name] : undefined;
@@ -221,6 +222,12 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
     recovery_action =
       "Use the supported text-artifact operation locally, or select a Cloudflare project for this operation.";
     retry_safety = "unsafe";
+  } else if (code === "payload-too-large") {
+    // Every size guard runs before the write, so nothing was applied; the same
+    // payload can never succeed, only a smaller one.
+    recovery_action =
+      "The request is over a size limit named in the message and was refused, not applied. Reduce the data (for a task, trim its data fields; a task already over its limit can only be updated to something smaller) and send a changed request. Sending the same payload again cannot succeed.";
+    retry_safety = "after_recovery";
   } else if (
     /invalid|validation|conflict|not-found|already-exists|no-active-recipients/.test(
       code,

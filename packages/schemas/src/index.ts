@@ -552,6 +552,13 @@ export {
   canonicalJsonSha256,
 } from "./record";
 
+// --- Task data bound ---
+export {
+  MAX_TASK_DATA_BYTES,
+  taskDataBytes,
+  taskDataTooLargeMessage,
+} from "./task-data";
+
 export * from "./capability";
 export * from "./continuity";
 export * from "./artifact-version";
