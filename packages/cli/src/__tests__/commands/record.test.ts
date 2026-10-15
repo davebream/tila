@@ -551,6 +551,77 @@ describe("tila record history", () => {
       includeValues: true,
     });
   });
+
+  const authored = {
+    type: "service",
+    key: "api",
+    operation: "set" as const,
+    schema_version: 1,
+    value_sha256: "c".repeat(64),
+    canonical_artifact_key: null,
+    source_artifact_key: null,
+    actor: "deploy-bot",
+    created_at: 1_700_000_000_000,
+    message: null,
+  };
+
+  it("history prints each revision's principal and token beside the actor", async () => {
+    mockListRecordHistory.mockResolvedValue({
+      items: [
+        {
+          ...authored,
+          revision: 3,
+          principal_id: "service:deploy",
+          token_id: "token-b",
+        },
+        // Written before principals were tracked: nothing is guessed.
+        { ...authored, revision: 1, principal_id: null, token_id: null },
+      ],
+      total: 2,
+      next_cursor: null,
+    });
+
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "history"), {
+      type: "service",
+      key: "api",
+      json: false,
+    });
+
+    const printed = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(printed).toContain("Principal");
+    expect(printed).toContain("Token");
+    expect(printed).toContain("deploy-bot");
+    expect(printed).toContain("service:deploy");
+    expect(printed).toContain("token-b");
+  });
+
+  it("history --json carries principal_id and token_id through unchanged", async () => {
+    const items = [
+      {
+        ...authored,
+        revision: 2,
+        principal_id: "user:alice",
+        token_id: null,
+      },
+      { ...authored, revision: 1, principal_id: null, token_id: "tok-old" },
+    ];
+    mockListRecordHistory.mockResolvedValue({
+      items,
+      total: 2,
+      next_cursor: null,
+    });
+
+    const cmd = await loadCommand();
+    await runCmd(getSubCommand(cmd, "history"), {
+      type: "service",
+      key: "api",
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.result.items).toEqual(items);
+  });
 });
 
 // ---------------------------------------------------------------------------
