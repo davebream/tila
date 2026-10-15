@@ -29,6 +29,8 @@ interface MultiSelectFilterProps {
   groups?: FilterGroup[];
   /** Right-aligned muted detail for an option, e.g. a row count. */
   optionMeta?: (option: string) => ReactNode;
+  /** Id of an element that says why the control is disabled. */
+  describedBy?: string;
 }
 
 export function MultiSelectFilter({
@@ -39,6 +41,7 @@ export function MultiSelectFilter({
   disabled,
   groups,
   optionMeta,
+  describedBy,
 }: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -126,6 +129,7 @@ export function MultiSelectFilter({
           variant="outline"
           size="sm"
           disabled={disabled || options.length === 0}
+          aria-describedby={describedBy}
           className="h-9 cursor-pointer gap-1.5 font-mono text-[13px]"
         >
           <span
