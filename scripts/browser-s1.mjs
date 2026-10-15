@@ -348,13 +348,19 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
     "--file",
     seed,
   ]);
-  step = "start isolated Worker and UI";
-  // Generate version.ts during preflight, before freezing source identity.
+  step = "generate Worker version";
+  await command("generate-worker-version", [
+    "--filter",
+    "@tila/worker",
+    "run",
+    "gen:version",
+  ]);
   assert.ok(
     (await readFile(resolve(workerDir, "src/version.ts"), "utf8")).includes(
       "DO_CODE_VERSION",
     ),
   );
+  step = "start isolated Worker and UI";
   const worker = launch("worker", [
     ...wrangler,
     "dev",
@@ -645,11 +651,12 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       record(step);
       step = "browser semantic TOML and YAML export/import";
       for (const format of ["TOML", "YAML"]) {
-        const downloadEvent = page.waitForEvent("download");
-        await page
-          .getByRole("button", { name: `Download ${format}`, exact: true })
-          .click();
-        const download = await downloadEvent;
+        const [download] = await Promise.all([
+          page.waitForEvent("download"),
+          page
+            .getByRole("button", { name: `Download ${format}`, exact: true })
+            .click(),
+        ]);
         const stream = await download.createReadStream();
         assert.ok(stream, "browser download must provide a stream");
         const chunks = [];
