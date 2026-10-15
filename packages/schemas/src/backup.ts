@@ -96,3 +96,27 @@ export type ProjectBackupObject = z.infer<typeof ProjectBackupObjectSchema>;
 export type ProjectBackupManifest = z.infer<typeof ProjectBackupManifestSchema>;
 export type ProjectTransferMode = z.infer<typeof ProjectTransferModeSchema>;
 export type ProjectTransferState = z.infer<typeof ProjectTransferStateSchema>;
+
+/** Checkpoint identity is included in the archive content-root checksum. */
+export const ProjectCheckpointSchema = z.object({
+  version: z.literal(1),
+  id: z.string().uuid(),
+  project_id: z.string().min(1),
+  instance: z.string().url(),
+  account_id: z.string().min(1),
+  snapshot_at: z.string().datetime(),
+});
+export type ProjectCheckpoint = z.infer<typeof ProjectCheckpointSchema>;
+
+export const ProjectRecoveryContextSchema = z.object({
+  policy: z.literal("preserve-current-access"),
+  checkpoint: ProjectCheckpointSchema,
+  requested_at: z.string().datetime(),
+  archive_digest: Sha256Schema,
+  safety_digest: Sha256Schema,
+  safety_snapshot_at: z.string().datetime().optional(),
+  safety_archive: z.string().min(1),
+});
+export type ProjectRecoveryContext = z.infer<
+  typeof ProjectRecoveryContextSchema
+>;

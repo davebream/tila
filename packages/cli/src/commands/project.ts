@@ -6,6 +6,8 @@ export default defineCommand({
     description: "Manage tila projects",
   },
   subCommands: {
+    checkpoint: () => import("./project/checkpoint").then((m) => m.default),
+    restore: () => import("./project/restore").then((m) => m.default),
     create: () => import("./project/create").then((m) => m.default),
     configure: () => import("./project/configure").then((m) => m.default),
     destroy: () => import("./project/destroy").then((m) => m.default),

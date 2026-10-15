@@ -1,8 +1,14 @@
-import { CredentialPolicySchema, policyContains } from "@tila/schemas";
+import { LATEST_PROJECT_MIGRATION } from "@tila/ops-sqlite";
+import {
+  CredentialPolicySchema,
+  ProjectRecoveryContextSchema,
+  policyContains,
+} from "@tila/schemas";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { RuntimeStore } from "../d1";
+import { D1ProjectRegistry, RuntimeStore } from "../d1";
 import { CredentialStore } from "../d1";
+import { preserveAccessRestore } from "../d1/checkpoint-restore";
 import {
   createRestoreRevisionStatements,
   serviceIdentitySnapshotRevision,
@@ -12,6 +18,7 @@ import { generateToken } from "../lib/hash";
 import { hashToken } from "../lib/hash-token";
 import { denied, scopedPolicy } from "../middleware/capability";
 import { requirePermission } from "../middleware/permission";
+import { reconcileCheckpointJournal } from "../r2/checkpoint-journal";
 import type { Env, HonoVariables } from "../types";
 import { requireD1Token } from "./admin";
 
@@ -31,6 +38,25 @@ export function createBackupRoutes(options: {
     backup.use("/*", requirePermission("admin"));
     backup.use("/*", requireD1Token);
   }
+  backup.get("/capabilities", async (c) => {
+    const project = await new D1ProjectRegistry(c.env.DB).getIncludingArchived(
+      c.get("projectId"),
+    );
+    return c.json({
+      recovery: options.projectTokenAuth ? null : "preserve-current-access-v1",
+      migrationVersion: LATEST_PROJECT_MIGRATION,
+      projectId: c.get("projectId"),
+      accountId: project?.cloudflareAccountId,
+    });
+  });
+  if (!options.projectTokenAuth)
+    backup.get("/recovery/:id", (c) =>
+      forwardToDO(
+        c.get("doStub"),
+        `/admin/transfer/recovery/${encodeURIComponent(c.req.param("id"))}`,
+        "GET",
+      ),
+    );
 
   const callerOwner = (c: Context<BackupEnv>): string => {
     if (!options.projectTokenAuth) return "infra";
@@ -306,7 +332,26 @@ export function createBackupRoutes(options: {
       sessionId?: string;
       mode?: TransferState["mode"];
       owner?: string;
+      recovery?: unknown;
     }>();
+    if (body.recovery !== undefined) {
+      if (options.projectTokenAuth || action !== "promote") return denied(c);
+      const parsed = ProjectRecoveryContextSchema.safeParse(body.recovery);
+      if (
+        !parsed.success ||
+        parsed.data.checkpoint.project_id !== c.get("projectId")
+      )
+        return c.json(
+          {
+            error: {
+              code: "validation-error",
+              message: "Invalid recovery context",
+            },
+          },
+          400,
+        );
+      body.recovery = parsed.data;
+    }
     if (action === "begin") {
       body.owner = callerOwner(c);
       if (
@@ -454,6 +499,45 @@ export function createBackupRoutes(options: {
         },
         404,
       );
+    const status = await forwardToDO(
+      c.get("doStub"),
+      "/admin/transfer/status",
+      "GET",
+    );
+    if (!status.ok) return status;
+    const { recovery } = (await status.json()) as { recovery?: unknown };
+    if (recovery) {
+      if (options.projectTokenAuth || body.createBootstrapToken)
+        return denied(c);
+      ProjectRecoveryContextSchema.parse(recovery);
+      const project = body.sections._projects?.[0];
+      if (
+        !project ||
+        (project.display_name !== null &&
+          typeof project.display_name !== "string") ||
+        !Number.isSafeInteger(project.schema_version)
+      )
+        return c.json(
+          {
+            error: {
+              code: "validation-error",
+              message: "Invalid project metadata",
+            },
+          },
+          400,
+        );
+      await preserveAccessRestore(c.env.DB, projectId, {
+        displayName: project.display_name as string | null,
+        schemaVersion: Number(project.schema_version),
+      });
+      await new RuntimeStore(
+        c.env.DB,
+        undefined,
+        undefined,
+        c.env.GITHUB_ACTIONS_TRUSTED_ISSUERS,
+      ).revokeProject(projectId, callerOwner(c));
+      return c.json({ ok: true, policy: "preserve-current-access" });
+    }
     const snapshotRevision = serviceIdentitySnapshotRevision(body.sections);
     if (snapshotRevision === null) {
       return c.json(
@@ -661,6 +745,47 @@ export function createBackupRoutes(options: {
     });
     return c.json({ ok: true });
   });
+
+  if (!options.projectTokenAuth)
+    backup.post("/journal-archives/reconcile", async (c) => {
+      const body = await c.req.json<{ sessionId: string; keys: string[] }>();
+      const transfer = await requireOwnedTransfer(c, body.sessionId, [
+        "import",
+        "rollback",
+      ]);
+      if (transfer instanceof Response) return transfer;
+      const status = await forwardToDO(
+        c.get("doStub"),
+        "/admin/transfer/status",
+        "GET",
+      );
+      if (!status.ok) return status;
+      const { recovery } = (await status.json()) as { recovery?: unknown };
+      if (
+        !recovery ||
+        !Array.isArray(body.keys) ||
+        body.keys.some(
+          (key) =>
+            typeof key !== "string" ||
+            !key.startsWith(`journal-archive/${c.get("projectId")}/`),
+        )
+      )
+        return c.json(
+          {
+            error: {
+              code: "validation-error",
+              message: "Invalid recovery journal inventory",
+            },
+          },
+          400,
+        );
+      await reconcileCheckpointJournal(
+        c.env.ARTIFACTS,
+        c.get("projectId"),
+        body.keys,
+      );
+      return c.json({ ok: true });
+    });
 
   backup.get("/journal-archives", async (c) => {
     const transfer = await requireOwnedTransfer(c, c.req.query("sessionId"), [

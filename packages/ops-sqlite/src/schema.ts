@@ -683,6 +683,7 @@ export const projectTransferState = sqliteTable("_project_transfer_state", {
   applying: integer("applying").notNull().default(0),
   agent_epochs_json: text("agent_epochs_json").notNull().default("{}"),
   queue_fences_json: text("queue_fences_json").notNull().default("{}"),
+  recovery_context: text("recovery_context"),
 });
 
 export const projectTransferChunks = sqliteTable(
@@ -1103,3 +1104,13 @@ export const reportSearchState = sqliteTable("report_search_state", {
   generation: text("generation").notNull(),
   error: text("error"),
 });
+export const projectRecoveryReceipts = sqliteTable(
+  "_project_recovery_receipts",
+  {
+    operation_id: text("operation_id").primaryKey(),
+    mode: text("mode").notNull(),
+    archive_digest: text("archive_digest").notNull(),
+    context: text("context").notNull(),
+    completed_at: integer("completed_at").notNull(),
+  },
+);

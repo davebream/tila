@@ -1,4 +1,4 @@
-import { queueBackupOps } from "@tila/ops-sqlite";
+import { projectRecoveryOps, queueBackupOps } from "@tila/ops-sqlite";
 import {
   LATEST_PROJECT_MIGRATION,
   type ProjectBackupTable,
@@ -19,8 +19,13 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
   const app = new Hono();
   const sql = deps.ctx.storage.sql;
 
-  app.get("/admin/transfer/status", (c) =>
-    c.json({ state: projectTransferOps.getTransferState(sql) }),
+  app.get("/admin/transfer/status", (c) => {
+    const state = projectTransferOps.getTransferState(sql);
+    const recovery = state ? projectRecoveryOps.context(deps.db) : null;
+    return c.json({ state, ...(recovery ? { recovery } : {}) });
+  });
+  app.get("/admin/transfer/recovery/:id", (c) =>
+    c.json({ receipt: projectRecoveryOps.receipt(deps.db, c.req.param("id")) }),
   );
 
   app.post("/admin/transfer/begin", async (c) => {
@@ -60,6 +65,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       mode: "import" | "rollback";
       archiveDigest: string;
       safetyArchive?: string;
+      recovery?: unknown;
     }>();
     try {
       deps.ctx.storage.transactionSync(() => {
@@ -71,6 +77,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
           body.archiveDigest,
           body.safetyArchive ?? null,
         );
+        if (body.recovery) projectRecoveryOps.bind(deps.db, body.recovery);
       });
     } catch (error) {
       // A rejected preflight must leave the destination available for reconciliation.
@@ -87,6 +94,14 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       sessionId: string;
       archiveDigest: string;
     }>();
+    const recovery = projectRecoveryOps.context(deps.db);
+    if (recovery && body.archiveDigest !== recovery.safety_digest)
+      return jsonError(
+        c,
+        "transfer-conflict",
+        "Rollback must use the operation safety archive",
+        409,
+      );
     deps.ctx.storage.transactionSync(() =>
       projectTransferOps.retargetTransfer(
         sql,
@@ -188,6 +203,8 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
       semanticDigest: string;
       migrationVersion?: number;
     }>();
+    const receipt = projectRecoveryOps.receipt(deps.db, body.sessionId);
+    if (receipt) return c.json({ ok: true, receipt });
     const state = projectTransferOps.getTransferState(sql);
     if (
       !state ||
@@ -220,6 +237,7 @@ export function createTransferRoutes(deps: RouterDeps): ProjectSubRouter {
     deps.ctx.storage.transactionSync(() => {
       agentBindingOps.invalidateRestoredBindings(deps.db);
       queueBackupOps.invalidateRestoredExecutions(deps.db);
+      projectRecoveryOps.complete(deps.db, body.sessionId);
       projectTransferOps.finishTransfer(sql, body.sessionId);
     });
     return c.json({ ok: true, semanticDigest: actual });
