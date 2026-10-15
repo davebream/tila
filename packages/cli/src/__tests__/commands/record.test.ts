@@ -588,7 +588,9 @@ describe("tila record history", () => {
       json: false,
     });
 
-    const printed = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    const printed = logSpy.mock.calls
+      .map((call: unknown[]) => String(call[0]))
+      .join("\n");
     expect(printed).toContain("Principal");
     expect(printed).toContain("Token");
     expect(printed).toContain("deploy-bot");
