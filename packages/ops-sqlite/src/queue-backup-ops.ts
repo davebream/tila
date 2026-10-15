@@ -122,24 +122,24 @@ export function readFenceWatermarks(
   db: ProjectDatabase,
 ): Record<string, number> {
   const result: Record<string, number> = Object.create(null);
-  const resources = new Set(
-    db
-      .select({ resource: schema.workAttempts.resource })
-      .from(schema.workAttempts)
-      .all()
-      .map((a) => a.resource),
-  );
   for (const fence of db.select().from(schema.fences).all())
-    if (resources.has(fence.resource))
-      result[fence.resource] = fence.current_fence;
+    result[fence.resource] = fence.current_fence;
   return result;
 }
 export function preserveRestoreFences(db: ProjectDatabase): void {
   const state = db.select().from(schema.projectTransferState).get();
   if (!state || state.applying) return;
   assertRestoreQuiescent(db);
+  const saved = z
+    .record(z.string(), z.number().int().nonnegative())
+    .parse(JSON.parse(state.queue_fences_json));
+  for (const [resource, fence] of Object.entries(readFenceWatermarks(db)))
+    saved[resource] = Math.max(
+      Object.hasOwn(saved, resource) ? saved[resource] : 0,
+      fence,
+    );
   db.update(schema.projectTransferState)
-    .set({ queue_fences_json: JSON.stringify(readFenceWatermarks(db)) })
+    .set({ queue_fences_json: JSON.stringify(saved) })
     .where(eq(schema.projectTransferState.singleton, 1))
     .run();
 }
@@ -275,6 +275,16 @@ export function invalidateRestoredExecutions(
     }
     const resources = new Set([
       ...Object.keys(saved),
+      ...tx
+        .select()
+        .from(schema.fences)
+        .all()
+        .map((row) => row.resource),
+      ...tx
+        .select()
+        .from(schema.claims)
+        .all()
+        .map((row) => row.resource),
       ...allAttempts.map((a) => a.resource),
     ]);
     for (const resource of resources) {
@@ -302,6 +312,7 @@ export function invalidateRestoredExecutions(
         .where(eq(schema.claims.resource, resource))
         .run();
     }
+    tx.delete(schema.presence).run();
     const origin = {
       principalId: "queue-restore",
       participantId: "queue-restore",

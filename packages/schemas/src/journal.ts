@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EnvironmentMetadataSchema, ParticipantIdSchema } from "./identity";
 
 export const JournalEventKindSchema = z.enum([
+  "project.restored",
   "question.asked",
   "question.answered",
   "question.escalated",

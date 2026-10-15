@@ -107,10 +107,23 @@ describe("project backup archive", () => {
       org: "local",
       skipFilesystemCheck: true,
     });
+    await expect(
+      recovered.project.updateWithFence(
+        "parent",
+        { status: "done" },
+        expected?.fence ?? 0,
+      ),
+    ).rejects.toThrow("Fence mismatch");
+    const claim = await recovered.project.acquire(
+      "task:parent",
+      "exclusive",
+      60_000,
+    );
+    expect(claim.fence).toBeGreaterThan(expected?.fence ?? 0);
     const updated = await recovered.project.updateWithFence(
       "parent",
       { status: "done" },
-      expected?.fence ?? 0,
+      claim.fence,
     );
     expect(updated.data.status).toBe("done");
     recovered.close();

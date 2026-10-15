@@ -858,6 +858,9 @@ export function preserveRestoreEpochs(db: DB) {
       .all()
       .map(({ id, epoch }) => [id, epoch]),
   );
+  const saved = JSON.parse(state.agent_epochs_json) as Record<string, number>;
+  for (const [id, epoch] of Object.entries(saved))
+    epochs[id] = Math.max(Object.hasOwn(epochs, id) ? epochs[id] : 0, epoch);
   db.update(schema.projectTransferState)
     .set({ agent_epochs_json: JSON.stringify(epochs) })
     .where(eq(schema.projectTransferState.singleton, 1))

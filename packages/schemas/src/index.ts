@@ -624,3 +624,10 @@ export {
   credentialValueLabel,
   containsCredentialValue,
 } from "./credential-patterns";
+
+export {
+  ProjectCheckpointSchema,
+  ProjectRecoveryContextSchema,
+  type ProjectCheckpoint,
+  type ProjectRecoveryContext,
+} from "./backup";

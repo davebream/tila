@@ -9,7 +9,12 @@ export function createCredentialFixture(
   beforeHumanMigration?: (sqlite: Database.Database) => void,
   beforeRevisionWatermarksMigration?: (sqlite: Database.Database) => void,
   beforeServiceRevisionsMigration?: (sqlite: Database.Database) => void,
-) {
+): {
+  sqlite: Database.Database;
+  db: D1Database;
+  store: CredentialStore;
+  legacy: D1TokenStore;
+} {
   const sqlite = new Database(":memory:");
   const dir = new URL("../../../migrations/global/", import.meta.url);
   for (const file of readdirSync(dir)

@@ -1746,6 +1746,23 @@ AND (expires_at IS NULL OR expires_at > (unixepoch('subsec') * 1000)))
 BEGIN SELECT RAISE(ABORT, 'project-maintenance'); END;
 `;
 
+const MIGRATION_0045 = `
+CREATE TABLE IF NOT EXISTS _project_recovery_receipts (
+  operation_id TEXT PRIMARY KEY,
+  mode TEXT NOT NULL,
+  archive_digest TEXT NOT NULL,
+  context TEXT NOT NULL,
+  completed_at INTEGER NOT NULL
+);
+`;
+function runMigration0045(storage: MigrationStorage): void {
+  if (!columnExists(storage, "_project_transfer_state", "recovery_context"))
+    storage.sql.exec(
+      "ALTER TABLE _project_transfer_state ADD COLUMN recovery_context TEXT",
+    );
+  storage.sql.exec(MIGRATION_0045);
+}
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   { version: 1, sql: MIGRATION_0001 },
   { version: 2, run: runMigration0002 },
@@ -1805,6 +1822,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_custom_correlation ON journal(json_extrac
   { version: 42, run: runMigration0042 },
   { version: 43, run: runMigration0043 },
   { version: 44, sql: MIGRATION_0044 },
+  { version: 45, run: runMigration0045 },
 ];
 
 /** Highest project migration; transfer metadata and backups report this version. */

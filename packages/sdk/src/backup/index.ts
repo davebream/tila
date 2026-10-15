@@ -21,6 +21,11 @@ import {
   projectTransferOps,
 } from "@tila/ops-sqlite";
 import {
+  type ProjectCheckpoint,
+  ProjectCheckpointSchema,
+  type ProjectRecoveryContext,
+} from "@tila/schemas";
+import {
   ArtifactCommitRecordSchema,
   ArtifactLifecycleRecordSchema,
   ParticipantIdSchema,
@@ -87,6 +92,8 @@ export type BackupProgress = {
 export type ExportProjectBackupOptions = {
   source: ProjectBackupSource;
   output: string;
+  /** Checkpoint metadata is bound to the server snapshot time during export. */
+  checkpoint?: Omit<ProjectCheckpoint, "snapshot_at">;
   onProgress?: (progress: BackupProgress) => void;
 };
 
@@ -96,6 +103,12 @@ export type ImportProjectBackupOptions = {
   replace?: boolean;
   resume?: boolean;
   rollback?: boolean;
+  /** Used by checkpoint recovery; only infrastructure-owner cloud restores. */
+  recovery?: {
+    operationId: string;
+    context: Omit<ProjectRecoveryContext, "safety_digest">;
+    safetyDigest?: string;
+  };
   onProgress?: (progress: BackupProgress) => void;
 };
 
@@ -103,6 +116,7 @@ export type InspectedProjectBackup = {
   header: ReturnType<typeof ProjectBackupHeaderSchema.parse>;
   manifest: ProjectBackupManifest;
   entries: string[];
+  checkpoint?: ProjectCheckpoint;
 };
 
 const encoder = new TextEncoder();
@@ -534,7 +548,8 @@ async function scanArchive(
       if (
         (captureData && !path.startsWith("blobs/")) ||
         path === "header.json" ||
-        path === "manifest.json"
+        path === "manifest.json" ||
+        path === "checkpoint.json"
       ) {
         chunks.push(Buffer.from(chunk));
       }
@@ -543,7 +558,7 @@ async function scanArchive(
       try {
         if (path.endsWith(".jsonl") && bytes > 0 && previous !== 10) rows += 1;
         const buffer = Buffer.concat(chunks);
-        if (captureData) data.set(path, buffer);
+        if (captureData || path === "checkpoint.json") data.set(path, buffer);
         if (path === "header.json")
           headerValue = JSON.parse(buffer.toString("utf8"));
         if (path === "manifest.json")
@@ -667,6 +682,15 @@ export async function inspectProjectBackup(
     header: scanned.header,
     manifest: scanned.manifest,
     entries: scanned.seen.map(({ path }) => path),
+    ...(scanned.data.has("checkpoint.json")
+      ? {
+          checkpoint: ProjectCheckpointSchema.parse(
+            JSON.parse(
+              scanned.data.get("checkpoint.json")?.toString("utf8") ?? "null",
+            ),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -970,16 +994,19 @@ async function exportCloud(
   const sessionId = control?.sessionId ?? randomUUID();
   let completed = false;
   try {
-    await client.json("/transfer/begin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        mode: "export",
-        owner: "sdk",
-        ttlMs: 300_000,
-      }),
-    });
+    const begun = await client.json<{ state: { started_at: number } }>(
+      "/transfer/begin",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          mode: "export",
+          owner: "sdk",
+          ttlMs: 300_000,
+        }),
+      },
+    );
     const pack = tar.pack();
     const writing = pipeline(
       pack,
@@ -987,6 +1014,13 @@ async function exportCloud(
     );
     const entries: ProjectBackupEntry[] = [];
     const createdAt = new Date().toISOString();
+    if (options.checkpoint) {
+      const checkpoint = ProjectCheckpointSchema.parse({
+        ...options.checkpoint,
+        snapshot_at: new Date(begun.state.started_at).toISOString(),
+      });
+      await addBuffer(pack, entries, "checkpoint.json", jsonBuffer(checkpoint));
+    }
     await addBuffer(
       pack,
       entries,
@@ -1234,7 +1268,7 @@ async function exportCloud(
         ...(meta.migrationVersion >= 36 ? ["work-questions-v1"] : []),
         ...(meta.migrationVersion >= 40 ? ["attempt-corrections-v1"] : []),
       ],
-      optional_sections: [],
+      optional_sections: options.checkpoint ? ["checkpoint.json"] : [],
       entries,
       content_root: contentRoot(entries),
       semantic_digest: meta.digest,
@@ -1297,10 +1331,16 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
     );
   }
   let safetyBackup: string | undefined;
-  let sessionId: string = randomUUID();
+  let recoveryContext: ProjectRecoveryContext | undefined;
+  let sessionId: string = options.recovery?.operationId ?? randomUUID();
   const client = new TilaOperatorClient(destination);
   let newProject = false;
-  if (destination.infraToken && !options.resume && !options.rollback) {
+  if (
+    destination.infraToken &&
+    !options.recovery &&
+    !options.resume &&
+    !options.rollback
+  ) {
     const bootstrap = await client.json<{ created: boolean }>("/bootstrap", {
       method: "POST",
       headers: {
@@ -1320,7 +1360,7 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
   ] as const) {
     if (!inspected.manifest.required_features.includes(feature)) continue;
     const target = await client.json<{ migrationVersion: number }>(
-      "/transfer/meta",
+      options.recovery ? "/capabilities" : "/transfer/meta",
     );
     if (
       !Number.isInteger(target.migrationVersion) ||
@@ -1331,15 +1371,41 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
       );
   }
   if (options.replace && !options.resume && !options.rollback) {
-    safetyBackup = safetyPath(options.archive, destination.projectId);
-    await exportCloud(
-      {
-        source: { ...destination, participantId: client.participantId },
-        output: safetyBackup,
-        onProgress: options.onProgress,
-      },
-      { sessionId, keepLock: true },
-    );
+    safetyBackup =
+      options.recovery?.context.safety_archive ??
+      safetyPath(options.archive, destination.projectId);
+    // Reuse a verified safety archive only while its original export lock is held.
+    const existingStatus = options.recovery
+      ? await client.json<{
+          state: { session_id: string; mode: string } | null;
+        }>("/transfer/status")
+      : null;
+    const reuseSafety = options.recovery && existsSync(safetyBackup);
+    if (
+      reuseSafety &&
+      (existingStatus?.state?.session_id !== sessionId ||
+        existingStatus.state.mode !== "export")
+    )
+      throw new Error(
+        "Safety export lock expired; start a new recovery operation",
+      );
+    if (!reuseSafety)
+      await exportCloud(
+        {
+          source: { ...destination, participantId: client.participantId },
+          output: safetyBackup,
+          onProgress: options.onProgress,
+        },
+        { sessionId, keepLock: true },
+      );
+    if (options.recovery) {
+      const safety = await inspectProjectBackup(safetyBackup);
+      recoveryContext = {
+        ...options.recovery.context,
+        safety_digest: safety.manifest.content_root,
+        safety_snapshot_at: safety.manifest.created_at,
+      };
+    }
     await client.json("/transfer/promote", {
       method: "POST",
       headers: {
@@ -1351,8 +1417,30 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
         mode: "import",
         archiveDigest: inspected.manifest.content_root,
         safetyArchive: safetyBackup,
+        ...(recoveryContext ? { recovery: recoveryContext } : {}),
       }),
     });
+  }
+  if (options.recovery && (options.resume || options.rollback)) {
+    const status = await client.json<{
+      state: { session_id: string } | null;
+      recovery: ProjectRecoveryContext | null;
+    }>("/transfer/status");
+    if (
+      status.state?.session_id !== sessionId ||
+      !status.recovery ||
+      status.recovery.archive_digest !==
+        options.recovery.context.archive_digest ||
+      status.recovery.safety_archive !== options.recovery.context.safety_archive
+    )
+      throw new Error("Recovery operation does not match the active transfer");
+    if (
+      options.rollback &&
+      inspected.manifest.content_root !== status.recovery.safety_digest
+    )
+      throw new Error(
+        "Rollback archive does not match the recorded safety digest",
+      );
   }
   const mode = options.rollback ? "rollback" : "import";
   if (options.rollback) {
@@ -1412,7 +1500,7 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
   const objects = parseJsonl(
     scanned.data.get("objects.jsonl"),
   ) as unknown as ProjectBackupObject[];
-  const spoolRoot = `${options.archive}.restore-${sessionId}`;
+  const spoolRoot = `${options.archive}.restore-${sessionId}-${randomUUID()}`;
   await mkdir(spoolRoot, { recursive: true });
   try {
     const extract = tar.extract();
@@ -1504,6 +1592,21 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
         }),
       },
     );
+    if (options.recovery)
+      await client.json("/journal-archives/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          keys: objects
+            .filter((object) =>
+              object.key.startsWith(
+                `journal-archive/${destination.projectId}/`,
+              ),
+            )
+            .map((object) => object.key),
+        }),
+      });
     await client.json("/transfer/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1559,3 +1662,5 @@ function collectRecoveryRecords(
     }
   }
 }
+
+export * from "./checkpoints";

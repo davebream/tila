@@ -8,6 +8,7 @@ import type * as schema from "./schema";
  * `_schema_history` is excluded from the domain set and returned separately as a diagnostic.
  */
 export const DOMAIN_TABLE_NAMES = [
+  "_project_recovery_receipts",
   "attempt_corrections",
   "question_receipts",
   "work_questions",
@@ -102,6 +103,7 @@ export function countStoreRows(
     domain: {
       report_search_docs: countTable(db, "report_search_docs"),
       report_search_state: countTable(db, "report_search_state"),
+      _project_recovery_receipts: countTable(db, "_project_recovery_receipts"),
       queue_policy: countTable(db, "queue_policy"),
       queue_entries: countTable(db, "queue_entries"),
       work_attempts: countTable(db, "work_attempts"),

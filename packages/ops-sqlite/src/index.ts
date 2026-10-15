@@ -183,3 +183,4 @@ export * as customJournalOps from "./custom-journal-ops";
 export { JournalReportError } from "./custom-journal-ops";
 
 export * as reportSearchOps from "./report-search-ops";
+export * as projectRecoveryOps from "./project-recovery-ops";
