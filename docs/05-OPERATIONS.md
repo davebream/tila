@@ -2005,6 +2005,49 @@ tila token issue --name worker --principal 'service:<uuid>' --role participant \
   session, run ceiling, workload binding or imported policy can never read or
   write more than its parent on either side.
 
+#### Authoring record limits in the dashboard
+
+The policy form used when issuing a credential, creating an invitation or
+editing a workload binding has a **Record access** control with three modes:
+
+| Mode | Writes |
+|---|---|
+| Every record the capabilities allow | no record limit |
+| Limit reads and writes to the same records | `records` (both sides) |
+| Limit reads and writes separately | `records_read` and `records_write` |
+
+Rules are one per line: `type` (every key of the type), `type/key-prefix` (that
+key and the keys below it, not siblings that merely start with the same
+characters) or `type (no keys)` (a rule that admits nothing). In either limited
+mode an empty list allows no record; removing every limit is its own mode, so
+clearing a list never widens access. An empty key prefix (`type/`) is refused
+instead of being read as the whole type, and a malformed line is reported with
+its list, line number and reason.
+
+- Opening a policy and saving it without editing a list writes that list back
+  as it was stored, including `records: []`, a rule with `key_prefixes: []` and
+  `task_types: []`. Earlier dashboards dropped these limits when saving.
+- Editing one side leaves the other as stored. A policy that left a side out
+  keeps it out, which denies it. The two forms are never written together.
+- Switching modes keeps what was typed in each mode and shows it again when you
+  return. The only text carried across modes is a single list that becomes both
+  sides of a separate limit, and two identical sides that become a single list.
+  A mode that has not been filled in yet is an empty list, which allows no
+  record, never a copy of a different rule.
+- Beneath the lists the form states what the policy reads and writes, treating a
+  side as `none` when its capability (`records:read` or `records:write`) is not
+  granted or the role is below it. The policy summary in credential, invitation
+  and binding lists states both sides with their key prefixes.
+
+The dashboard only decides which controls to offer; the Worker enforces both
+sides. Records and the Overview's record counts are hidden from a credential
+whose read side admits nothing. A credential that may write a key it cannot read
+is offered the create (for a type it can see) but the new record is not opened,
+because the detail page reads it. The catalog lists only readable types, so the
+create form cannot be built for a type that is writable but not readable; use
+the CLI or API for that. `tila token issue --restrictions` accepts the same JSON
+shape and reports an invalid one against the flag.
+
 Upgrade note: policies that use `records_read` or `records_write` cannot be
 parsed by a Worker from before this change, because policy objects are strict.
 That Worker rejects them and the credential has no access; it does not fall back
