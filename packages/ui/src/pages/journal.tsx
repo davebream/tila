@@ -1,3 +1,4 @@
+import { JournalHistoryControl } from "@/components/journal-history-control";
 import {
   JournalReportForm,
   ProjectReportDetails,
@@ -18,10 +19,12 @@ import {
 import { TableError } from "@/components/ui/table-error";
 import { useAuth } from "@/hooks/use-auth";
 import { useDebouncedValue } from "@/hooks/use-debounce";
+import { useJournalHistory } from "@/hooks/use-journal-history";
 import { listJournal } from "@/lib/api";
+import { hasActiveFilters } from "@/lib/journal-history";
 import { formatTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 const MAX_ROWS = 500;
@@ -252,7 +255,9 @@ function mapSourceToAffix(
   }
 }
 
-function EventRow({ event }: { event: JournalEvent }) {
+// Memoized: the table can hold the live tail plus a buffer of older history,
+// and a tail poll or a history load should not re-render rows it did not touch.
+const EventRow = memo(function EventRow({ event }: { event: JournalEvent }) {
   const { projectId } = useAuth();
   const [dataOpen, setDataOpen] = useState(false);
   const hasData = event.data && Object.keys(event.data).length > 0;
@@ -319,7 +324,7 @@ function EventRow({ event }: { event: JournalEvent }) {
       )}
     </>
   );
-}
+});
 
 export function JournalPage() {
   const { projectId } = useAuth();
@@ -528,6 +533,50 @@ export function JournalPage() {
     }
   }, [tailQuery.data, scrollToBottom, isAtBottom, refetchTail]);
 
+  // Older history is read through replay into a buffer of its own. It shares
+  // the filters with the tail and nothing else: `lastSeqRef` is read once, to
+  // learn where the live view begins, and no history load ever writes it, so
+  // the tail's cursor, prune and archive-skip logic above are unaffected.
+  const historyFilters = useMemo(
+    () => ({
+      resource: filterResource,
+      kind: filterKind,
+      clientName: filterClientName,
+      eventName: filterEventName,
+      correlationId: filterCorrelation,
+    }),
+    [
+      filterResource,
+      filterKind,
+      filterClientName,
+      filterEventName,
+      filterCorrelation,
+    ],
+  );
+  const history = useJournalHistory({
+    projectId,
+    filters: historyFilters,
+    readAnchor: () =>
+      events.length > 0
+        ? { seq: events[0].seq, fromRow: true }
+        : { seq: lastSeqRef.current + 1, fromRow: false },
+  });
+  const liveLow = events.length > 0 ? events[0].seq : null;
+  // History sits below the live view; a row the tail now shows is not repeated.
+  const historyRows = useMemo(
+    () =>
+      liveLow === null
+        ? history.rows
+        : history.rows.filter((row) => row.seq < liveLow),
+    [history.rows, liveLow],
+  );
+  // The tail prunes (or reseeds) independently, so its first row can move past
+  // where history began. Say so rather than show a silent hole.
+  const historyGap =
+    history.anchor?.fromRow && liveLow !== null && liveLow > history.anchor.seq
+      ? { from: history.anchor.seq, through: liveLow - 1 }
+      : null;
+
   const loadError = initialQuery.isError ? initialQuery.error : null;
   const initialLoaded = initialQuery.isSuccess;
 
@@ -702,6 +751,14 @@ export function JournalPage() {
         </div>
       )}
 
+      {projectId && initialLoaded && !loadError && (
+        <JournalHistoryControl
+          history={history}
+          filtered={hasActiveFilters(historyFilters)}
+          gap={historyGap}
+        />
+      )}
+
       <div
         ref={scrollRef}
         className="relative flex-1 overflow-y-auto border-t border-border"
@@ -717,7 +774,7 @@ export function JournalPage() {
               setRetryKey((k) => k + 1);
             }}
           />
-        ) : events.length === 0 ? (
+        ) : events.length === 0 && historyRows.length === 0 ? (
           <p className="p-4 text-muted-foreground">
             {initialLoaded
               ? "No journal events match the current filters. Events stream in real-time as agents operate."
@@ -742,6 +799,9 @@ export function JournalPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {historyRows.map((event) => (
+                <EventRow key={event.seq} event={event} />
+              ))}
               {events.map((event) => (
                 <EventRow key={event.seq} event={event} />
               ))}
@@ -759,8 +819,10 @@ export function JournalPage() {
         )}
         {events.length >= MAX_ROWS - PRUNE_COUNT && (
           <p className="px-3 py-1.5 text-center font-mono text-[11px] text-fg-faint">
-            Showing latest {events.length} events. Older events are trimmed
-            automatically.
+            Showing latest {events.length} events.{" "}
+            {history.restricted
+              ? "Older events are trimmed automatically."
+              : "The live view trims older events automatically; Load older reads them back from history."}
           </p>
         )}
         {showJumpBtn && (
