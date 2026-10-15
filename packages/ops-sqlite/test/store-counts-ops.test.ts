@@ -65,6 +65,8 @@ const EXPECTED_DOMAIN_TABLES = [
   "artifact_search_docs",
   "entity_search_docs",
   "record_search_docs",
+  "report_search_docs",
+  "report_search_state",
   "entity_tags",
   "artifact_tags",
 ];

@@ -6,6 +6,7 @@ import {
   coordinationOps,
   journalArchiveOps,
   journalOps,
+  schema,
 } from "@tila/ops-sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { exportProjectBackup, importProjectBackup } from "../../backup";
@@ -252,5 +253,44 @@ it("backs up metadata and immutable lifecycle records after all revision pointer
     expect(await blobs.exists(key)).toBe(false);
   } finally {
     restored.close();
+  }
+});
+
+it("backfills report search from Node archives through the public search adapter", async () => {
+  const opts = options();
+  const local = await createTilaLocal(opts);
+  try {
+    const db = local.project.getDb();
+    db.transaction((tx) =>
+      journalOps.appendJournal(tx, {
+        kind: "custom.reported",
+        resource: "project:project",
+        actor: identity.principal_id,
+        principalId: identity.principal_id,
+        participantId: identity.participant_id,
+        environment: identity.environment,
+        data: {
+          event_name: "pipeline.reviewed",
+          event_version: 1,
+          target: { kind: "project" },
+          data: { nested: ["nodeneedle"] },
+        },
+      }),
+    );
+    const archived = journalArchiveOps.getArchivableEvents(db);
+    await new NodeBlobStore(opts.artifactsPath).write(
+      "journal-archive/project/2026/old.jsonl",
+      archived.events.map((row) => JSON.stringify(row)).join("\n"),
+    );
+    journalArchiveOps.markArchived(db, archived.throughSeq);
+    const facade = buildLocalResources(local.project, local.artifacts);
+    const found = await facade.search.search("nodeneedle", {
+      kind: ["report"],
+    });
+    expect(found.results).toMatchObject([{ type: "report", seq: 1 }]);
+    expect(found.scope?.report_history?.status).toBe("complete");
+    expect(db.select().from(schema.reportSearchDocs).all()).toHaveLength(1);
+  } finally {
+    local.close();
   }
 });

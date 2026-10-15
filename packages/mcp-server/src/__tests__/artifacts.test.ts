@@ -318,6 +318,51 @@ describe("registerArtifactTools", () => {
   });
 
   describe("tila_search", () => {
+    it("forwards report selection and cursor and preserves coverage metadata", async () => {
+      const response = {
+        ok: true,
+        results: [
+          {
+            type: "report",
+            seq: 7,
+            t: 1,
+            resource: "project:p",
+            principal_id: "p",
+            event_name: "pipeline.checked",
+            correlation_id: null,
+            corrects_seq: null,
+            snippet: "needle",
+            indexed_at: 1,
+          },
+        ],
+        total: 1,
+        next_cursor: "next",
+        scope: {
+          kinds: ["report"],
+          restricted: false,
+          archived: "excluded",
+          report_history: {
+            archived: "included",
+            status: "running",
+            indexed_through_seq: 0,
+            target_through_seq: 7,
+          },
+        },
+      };
+      facade.search.search.mockResolvedValue(response);
+      const result = await findHandler("tila_search")({
+        q: "needle",
+        limit: 2,
+        kind: ["report"],
+        cursor: "cursor",
+      });
+      expect(facade.search.search).toHaveBeenCalledWith("needle", {
+        limit: 2,
+        kind: ["report"],
+        cursor: "cursor",
+      });
+      expect(JSON.parse(result.content[0].text)).toEqual(response);
+    });
     it("calls search.search with limit", async () => {
       facade.search.search.mockResolvedValue({ ok: true, results: [] });
 

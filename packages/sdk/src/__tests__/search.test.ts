@@ -21,6 +21,31 @@ describe("createSearchMethods", () => {
     vi.unstubAllGlobals();
   });
 
+  it("forwards report kind and pagination and retains partial coverage", async () => {
+    const response = {
+      ok: true,
+      results: [{ type: "report", seq: 9 }],
+      next_cursor: "next",
+      scope: {
+        report_history: {
+          status: "failed",
+          error: "journal-history-unavailable",
+        },
+      },
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(response));
+    const search = createSearchMethods(
+      new TilaClient({ baseUrl: "https://api.test", token: "t" }),
+      "proj-1",
+    );
+    expect(
+      await search.search("needle", { kind: ["report"], cursor: "cursor" }),
+    ).toEqual(response);
+    const url = new URL(mockFetch.mock.calls[0][0]);
+    expect(url.searchParams.get("kind")).toBe("report");
+    expect(url.searchParams.get("cursor")).toBe("cursor");
+  });
+
   it("search issues GET /projects/:id/search with q", async () => {
     mockFetch.mockResolvedValueOnce(
       mockResponse({ ok: true, results: [], total: 0 }),
