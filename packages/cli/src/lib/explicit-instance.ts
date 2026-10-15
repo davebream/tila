@@ -10,8 +10,9 @@ import { type GlobalFlags, getGlobalFlags } from "./global-flags";
 
 /**
  * Raised when an explicit --instance cannot be proved to be the deployment of
- * the project that a command would act on. Nothing has been sent when it is
- * thrown: the guard runs before credentials are read or a client is built.
+ * the project (or infrastructure) that a command would act on. Nothing has been
+ * sent when it is thrown: the guards run before credentials are read, a client
+ * is built, or anything local is changed.
  */
 export class ExplicitInstanceTargetError extends Error {
   readonly code = "invalid-argument" as const;
@@ -25,10 +26,25 @@ export class ExplicitInstanceTargetError extends Error {
   }
 }
 
-const SELECT_HINT =
-  "Data commands act on the project in the current directory. Run from that instance's project directory, or omit --instance.";
-
 type RegistryReader = Pick<AuthStore, "getInstance">;
+type ExplicitFlags = Pick<GlobalFlags, "instance" | "project">;
+
+/** What the command would act on, for messages and remediation. */
+interface Subject {
+  /** Noun phrase for "different deployment from <subject>". */
+  noun: string;
+  hint: string;
+}
+
+const DIRECTORY_PROJECT: Subject = {
+  noun: "the project in this directory",
+  hint: "Data commands act on the project in the current directory. Run from that instance's project directory, or omit --instance.",
+};
+
+const INFRA_WORKER: Subject = {
+  noun: "the Worker in ~/.tila/infra.toml that infra-owner destroy acts on",
+  hint: "Infra-owner destroy targets that Worker by slug and does not select an instance with --instance. Omit --instance, or name the instance whose Worker that is.",
+};
 
 function defaultRegistry(): RegistryReader {
   return new AuthStore({
@@ -36,6 +52,53 @@ function defaultRegistry(): RegistryReader {
     secrets: new KeyringSecretStore(),
     env: processEnvProbe,
   });
+}
+
+/** Registered, trusted, and its Worker URL is exactly `workerUrl`. */
+async function assertInstanceIsWorker(
+  key: string,
+  workerUrl: string,
+  subject: Subject,
+  registry: RegistryReader | undefined,
+): Promise<void> {
+  const named = JSON.stringify(key);
+  const record = await (registry ?? defaultRegistry()).getInstance(
+    key as InstanceKey,
+  );
+  const decision = evaluateTrust(
+    {
+      worker_url: workerUrl,
+      instance_key: key as InstanceKey,
+      inlineToken: false,
+    },
+    record,
+  );
+  if (decision.kind === "untrusted-needs-login")
+    throw new ExplicitInstanceTargetError(
+      decision.reason === "unregistered"
+        ? `Unknown instance ${named}. --instance must name a registered instance.`
+        : `Instance ${named} is registered but not trusted.`,
+      decision.reason === "unregistered"
+        ? "List registered instances with 'tila instances list', or omit --instance."
+        : "Run 'tila auth login' to trust it, or omit --instance.",
+    );
+  if (decision.kind !== "trusted")
+    throw new ExplicitInstanceTargetError(
+      `--instance ${named} is a different deployment from ${subject.noun}.`,
+      subject.hint,
+    );
+}
+
+function assertProjectFlag(
+  flags: ExplicitFlags,
+  projectId: string,
+  subject: Subject,
+): void {
+  if (flags.project === undefined || flags.project === projectId) return;
+  throw new ExplicitInstanceTargetError(
+    `--project ${JSON.stringify(flags.project)} is not the project this command targets (project_id is ${JSON.stringify(projectId)}), so --instance ${JSON.stringify(flags.instance)} cannot be verified for it.`,
+    subject.hint,
+  );
 }
 
 /**
@@ -57,7 +120,7 @@ function defaultRegistry(): RegistryReader {
  */
 export async function assertExplicitInstanceTarget(
   config: TilaProjectConfig,
-  flags: Pick<GlobalFlags, "instance" | "project"> = getGlobalFlags(),
+  flags: ExplicitFlags = getGlobalFlags(),
   registry?: RegistryReader,
 ): Promise<void> {
   const key = flags.instance;
@@ -67,50 +130,49 @@ export async function assertExplicitInstanceTarget(
   if (config.backend === "local")
     throw new ExplicitInstanceTargetError(
       `--instance ${named} cannot target the local project in this directory (local projects have no instance).`,
-      SELECT_HINT,
+      DIRECTORY_PROJECT.hint,
     );
   if (!config.worker_url)
     throw new ExplicitInstanceTargetError(
       `--instance ${named} cannot be verified: the project in this directory has no worker_url.`,
-      SELECT_HINT,
+      DIRECTORY_PROJECT.hint,
     );
 
-  const record = await (registry ?? defaultRegistry()).getInstance(
-    key as InstanceKey,
+  await assertInstanceIsWorker(
+    key,
+    config.worker_url,
+    DIRECTORY_PROJECT,
+    registry,
   );
-  const decision = evaluateTrust(
-    {
-      worker_url: config.worker_url,
-      instance_key: key as InstanceKey,
-      inlineToken: false,
-    },
-    record,
-  );
-  if (decision.kind === "untrusted-needs-login")
-    throw new ExplicitInstanceTargetError(
-      decision.reason === "unregistered"
-        ? `Unknown instance ${named}. --instance must name a registered instance.`
-        : `Instance ${named} is registered but not trusted.`,
-      decision.reason === "unregistered"
-        ? "List registered instances with 'tila instances list', or omit --instance."
-        : "Run 'tila auth login' to trust it, or omit --instance.",
-    );
-  if (decision.kind !== "trusted")
-    throw new ExplicitInstanceTargetError(
-      `--instance ${named} is a different deployment from the project in this directory.`,
-      SELECT_HINT,
-    );
 
   const pinned = config.instance?.instance_key;
   if (pinned !== undefined && pinned !== key)
     throw new ExplicitInstanceTargetError(
       `--instance ${named} conflicts with the project in this directory, which is pinned to instance ${JSON.stringify(pinned)}.`,
-      SELECT_HINT,
+      DIRECTORY_PROJECT.hint,
     );
 
-  if (flags.project !== undefined && flags.project !== config.project_id)
-    throw new ExplicitInstanceTargetError(
-      `--project ${JSON.stringify(flags.project)} is not the project in this directory (project_id is ${JSON.stringify(config.project_id)}), so --instance ${named} cannot be verified for it.`,
-      SELECT_HINT,
-    );
+  assertProjectFlag(flags, config.project_id, DIRECTORY_PROJECT);
+}
+
+/**
+ * Infra-owner destroy by slug acts on the Worker saved in ~/.tila/infra.toml,
+ * independent of any project in the current directory. --instance is never a
+ * selector there: an explicit key is accepted only as an assertion that it is
+ * that Worker's registered, trusted instance (and --project, when present,
+ * is the slug); otherwise the destroy is refused before any credential is read.
+ */
+export async function assertExplicitInstanceIsInfraWorker(
+  target: { workerUrl: string; slug: string },
+  flags: ExplicitFlags = getGlobalFlags(),
+  registry?: RegistryReader,
+): Promise<void> {
+  if (flags.instance === undefined) return;
+  await assertInstanceIsWorker(
+    flags.instance,
+    target.workerUrl,
+    INFRA_WORKER,
+    registry,
+  );
+  assertProjectFlag(flags, target.slug, INFRA_WORKER);
 }
