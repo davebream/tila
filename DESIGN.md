@@ -131,7 +131,7 @@ The palette is a dark void with one blue signal and three status channels. Color
 
 ## 3. Typography
 
-**Logo/Heading Font:** Space Grotesk (`"Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif`) — loaded from Google Fonts. Used only for the logo mark and view headings. Geometric, technical precision with warmth.
+**Logo/Heading Font:** Space Grotesk (`"Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif`) — self-hosted: weights 500 and 700, Latin and Latin Extended subsets (which cover Polish diacritics), bundled as same-origin woff2 assets under the SIL Open Font License 1.1 (`packages/ui/src/assets/fonts/space-grotesk/`) with `font-display: swap`. The dashboard makes no third-party font requests; characters outside those subsets fall back to the system sans stack. Used only for the logo mark and view headings. Geometric, technical precision with warmth.
 **Body Font:** System sans-serif (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`)
 **Data Font:** System monospace (`"SF Mono", "Fira Code", "Cascadia Code", monospace`)
 

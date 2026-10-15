@@ -206,6 +206,11 @@ export function recoveryFor(error: unknown, readOnly = false): McpRecovery {
     recovery_action =
       "Inspect current claims and state. Stop writing with the old fence; acquire a new claim only when available, then reconcile changes before writing.";
     retry_safety = "after_recovery";
+  } else if (code === "report-correction-denied") {
+    // An authority decision about this report, not a credential or session problem.
+    recovery_action =
+      "Only the original reporter or a project maintainer or owner can correct this report, and nothing was recorded. Send a new report without corrects_seq (reuse its correlation_id to relate it), or ask a maintainer to correct it. Sending the same correction again cannot succeed.";
+    retry_safety = "after_recovery";
   } else if (
     candidate?.status === 401 ||
     candidate?.status === 403 ||

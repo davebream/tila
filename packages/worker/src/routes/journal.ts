@@ -4,6 +4,7 @@ import {
   JournalAppendRequestSchema,
   JournalCorrelationIdSchema,
   JournalIdempotencyKeySchema,
+  PROJECT_ROLE_RANK,
   journalValidationCode,
 } from "@tila/schemas";
 import { Hono } from "hono";
@@ -11,6 +12,7 @@ import { bodyLimit } from "hono/body-limit";
 import { analyticsCtxFrom } from "../lib/analytics";
 import { forwardToDO } from "../lib/do-forward";
 import { requirePermission } from "../middleware/permission";
+import { authorizeProtectedOperation } from "../middleware/protected-operation";
 import { identityPayload } from "../middleware/request-identity";
 import type { Env, HonoVariables } from "../types";
 
@@ -63,6 +65,16 @@ journal.post(
         code === "payload-too-large" ? 413 : 400,
       );
     }
+    let authorizedRole = c.get("effectiveRole") ?? "viewer";
+    // Correcting another principal's report is a maintainer-level act. Mirrored
+    // or snapshot roles must be verified like any other maintainer operation;
+    // a role that cannot be verified still lets the reporter correct their own.
+    if (
+      input.data.corrects_seq !== undefined &&
+      PROJECT_ROLE_RANK[authorizedRole] >= PROJECT_ROLE_RANK.maintainer &&
+      (await authorizeProtectedOperation(c, "maintainer"))
+    )
+      authorizedRole = "participant";
     return forwardToDO(
       c.get("doStub"),
       "/journal/append",
@@ -70,7 +82,7 @@ journal.post(
       {
         ...identityPayload(c),
         project_id: c.get("projectId"),
-        authorized_role: c.get("effectiveRole") ?? "viewer",
+        authorized_role: authorizedRole,
         input: input.data,
         idempotency_key: key.data,
       },
