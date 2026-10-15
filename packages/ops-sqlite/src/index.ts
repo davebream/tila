@@ -157,6 +157,7 @@ export type {
 
 export * from "./credential-policy";
 export * as continuityOps from "./continuity-ops";
+export * as journalVisibilityOps from "./journal-visibility";
 export * as summaryOps from "./summary-ops";
 
 export * as artifactLifecycleOps from "./artifact-lifecycle-ops";

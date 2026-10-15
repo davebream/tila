@@ -9,6 +9,7 @@ import {
   coordinationOps,
   journalArchiveOps,
   journalOps,
+  journalVisibilityOps,
   resolveEntityResource,
 } from "@tila/ops-sqlite";
 import { hasNamespaceRestrictions } from "@tila/schemas";
@@ -236,17 +237,69 @@ export function createCoordinationRoutes(deps: RouterDeps): ProjectSubRouter {
     // "archived" indicator instead of an ambiguous empty list. Recent
     // {limit:N} reads (no after_seq) are unaffected: archived stays false.
     const watermark = journalArchiveOps.getArchiveWatermark(db);
+    const policy = readCredentialPolicy(
+      c.req.header("X-Tila-Credential-Policy"),
+    );
+    const listQuery = {
+      resource,
+      kind,
+      client_name,
+      event_name: c.req.query("event_name"),
+      correlation_id: c.req.query("correlation_id"),
+      after_seq,
+      limit,
+    };
+    // A namespace-restricted credential sees only the events it may read, and
+    // never the raw list.
+    if (policy && hasNamespaceRestrictions(policy)) {
+      if (
+        limit !== undefined &&
+        !(
+          Number.isInteger(limit) &&
+          limit >= 1 &&
+          limit <= journalVisibilityOps.SCOPED_LIST_MAX_LIMIT
+        )
+      )
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          `limit must be an integer from 1 to ${journalVisibilityOps.SCOPED_LIST_MAX_LIMIT}`,
+        );
+      if (
+        after_seq !== undefined &&
+        !(Number.isSafeInteger(after_seq) && after_seq >= 0)
+      )
+        return jsonError(
+          c,
+          400,
+          "validation-error",
+          "after_seq must be a non-negative integer",
+        );
+      const scoped = journalVisibilityOps.listScopedJournal(
+        db,
+        policy,
+        listQuery,
+        watermark ?? undefined,
+      );
+      const state = journalOps.journalArchiveState(after_seq, watermark);
+      // `has_more` is what separates "caught up" from "stopped early": the
+      // scan of a restricted list is bounded, and a short page alone is not
+      // an answer.
+      return c.json({
+        ok: true,
+        events: scoped.events,
+        archived: state.archived,
+        lastArchivedSeq: state.lastArchivedSeq,
+        has_more: scoped.has_more,
+        ...(scoped.next_after_seq !== undefined && {
+          next_after_seq: scoped.next_after_seq,
+        }),
+      });
+    }
     const events = journalOps.listJournal(
       db,
-      {
-        resource,
-        kind,
-        client_name,
-        event_name: c.req.query("event_name"),
-        correlation_id: c.req.query("correlation_id"),
-        after_seq,
-        limit,
-      },
+      listQuery,
       watermark ?? undefined,
     );
     const { archived, lastArchivedSeq } = journalOps.journalArchiveState(
