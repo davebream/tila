@@ -1985,7 +1985,8 @@ tila token issue --name worker --principal 'service:<uuid>' --role participant \
   nothing.
 - A policy that sets only one side is still a restricted credential: it is
   limited to the same surfaces as any other namespace restriction.
-- Reading covers `GET /records/:type/:key`, `~/history`, listing and counts,
+- Reading covers `GET /records/:type/:key` (including its metadata-only
+  `?meta=1` form), `~/history`, listing and counts,
   the record catalog, record search and claim state or listing. Writing covers
   create, set, put, patch, archive, unarchive and acquiring, renewing or
   releasing a claim on `record:<type>/<key>`.

@@ -2952,7 +2952,7 @@ is denied.
 
 | Operation | Side | Worker (`capabilityMiddleware`) | DO (`assertCredentialRequest`) |
 |---|---|---|---|
-| `GET/HEAD /records/:type/:key`, `~/history/:key` | read | key against `records_read` | same |
+| `GET/HEAD /records/:type/:key` (including `?meta=1`), `~/history/:key` | read | key against `records_read` | same |
 | `GET /records/:type`, `GET /records/_types`, record search | read | passed through | rows, counts, types and catalog filtered by the read side |
 | `POST /records/:type`, `PUT /records/:type/:key`, `POST ~/put/:key` | write | key against `records_write` | same; response is a receipt when the read side does not admit the key |
 | `PATCH /records/:type/:key`, `POST ~/archive/:key`, `POST ~/unarchive/:key` | write and read | both sides for the same key | same (these return the stored record) |
