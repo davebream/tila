@@ -783,8 +783,11 @@ const handoff = await tila.handoffs.create({
 ```
 
 Replay is oldest-first with a fixed `through_seq`, a default page size of 100,
-and a maximum of 200. `journal.query()` retains its existing behavior. Replay
-includes archived history; missing or unreadable history fails explicitly.
+and a maximum of 200. `journal.query()` without `after_seq` returns the newest
+events, newest first. With `after_seq` it returns the next `limit` events after
+that sequence, oldest first, so advancing `after_seq` to the last `seq` pages
+forward without skipping events. Replay includes archived history; missing or
+unreadable history fails explicitly.
 `getCursor()` and `acknowledge()` return `{ ok, cursor: { seq, updated_at } }`.
 Acknowledgements never move backwards, reject future positions, and survive
 presence expiry. Reads do not automatically acknowledge signals or journal events.

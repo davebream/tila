@@ -288,6 +288,142 @@ describe("JournalPage", () => {
     }, 10000);
   });
 
+  describe("accumulator — cursor paging", () => {
+    const range = (from: number, through: number) =>
+      Array.from({ length: through - from + 1 }, (_, i) => from + i);
+    const renderedSeqs = () =>
+      screen
+        .getAllByText(/^#\d+$/)
+        .map((cell) => Number(cell.textContent?.slice(1)));
+
+    // The API returns the newest page newest-first when no cursor is sent.
+    test("(d) shows the newest-first initial page oldest-first, ending at the latest event", async () => {
+      server.use(
+        http.get("*/projects/*/journal", ({ request }) => {
+          const afterSeq = new URL(request.url).searchParams.get("after_seq");
+          if (afterSeq !== null) {
+            return HttpResponse.json({ ok: true, events: [] });
+          }
+          return HttpResponse.json({
+            ok: true,
+            events: [4, 3, 2, 1].map((seq) => makeEvent(seq)),
+          });
+        }),
+      );
+
+      renderWithProviders(<JournalPage />);
+
+      await waitFor(() => expect(renderedSeqs()).toEqual([1, 2, 3, 4]), {
+        timeout: 5000,
+      });
+    });
+
+    test("(e) drains a burst of more than one page in order from a single poll tick", async () => {
+      let head = 100;
+      const polled: { cursor: number; count: number }[] = [];
+      let firstPollSeen: () => void = () => {};
+      const firstPoll = new Promise<void>((resolve) => {
+        firstPollSeen = resolve;
+      });
+      server.use(
+        http.get("*/projects/*/journal", ({ request }) => {
+          const params = new URL(request.url).searchParams;
+          const limit = Number(params.get("limit"));
+          const afterSeq = params.get("after_seq");
+          if (afterSeq === null) {
+            return HttpResponse.json({
+              ok: true,
+              events: range(head - limit + 1, head)
+                .reverse()
+                .map((seq) => makeEvent(seq)),
+            });
+          }
+          const cursor = Number(afterSeq);
+          const events = range(cursor + 1, Math.min(head, cursor + limit)).map(
+            (seq) => makeEvent(seq),
+          );
+          polled.push({ cursor, count: events.length });
+          firstPollSeen();
+          return HttpResponse.json({
+            ok: true,
+            events,
+            archived: false,
+            lastArchivedSeq: null,
+          });
+        }),
+      );
+
+      // Own the 3s poll timer, and only that timer: advancing it once is
+      // exactly one scheduled poll, so every later page can only come from
+      // following a full page. No assertion here depends on host speed.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        renderWithProviders(<JournalPage />);
+        await waitFor(
+          () => expect(screen.getByText("#100")).toBeInTheDocument(),
+          { timeout: 5000 },
+        );
+        await firstPoll; // The read on mount: nothing new yet.
+
+        head = 350; // 250 events land between two polls: more than two pages.
+        vi.advanceTimersByTime(3000); // Exactly one scheduled poll.
+
+        await waitFor(() => expect(renderedSeqs()).toEqual(range(1, 350)), {
+          timeout: 15000,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // Each page continues from the last seq of the one before it.
+      const pages = polled.filter((entry) => entry.count > 0);
+      expect(pages.map((entry) => entry.cursor)).toEqual([100, 200, 300]);
+      expect(pages.map((entry) => entry.count)).toEqual([100, 100, 50]);
+    }, 30000);
+
+    test("(f) skips past the archive watermark when the cursor sits below it", async () => {
+      const cursors: number[] = [];
+      server.use(
+        http.get("*/projects/*/journal", ({ request }) => {
+          const afterSeq = new URL(request.url).searchParams.get("after_seq");
+          if (afterSeq === null) {
+            // Everything live was archived, or no live row matches the filter.
+            return HttpResponse.json({
+              ok: true,
+              events: [],
+              archived: false,
+              lastArchivedSeq: 50,
+            });
+          }
+          const cursor = Number(afterSeq);
+          cursors.push(cursor);
+          if (cursor < 50) {
+            return HttpResponse.json({
+              ok: true,
+              events: [],
+              archived: true,
+              lastArchivedSeq: 50,
+            });
+          }
+          return HttpResponse.json({
+            ok: true,
+            events: [51, 52].map((seq) => makeEvent(seq)),
+            archived: false,
+            lastArchivedSeq: 50,
+          });
+        }),
+      );
+
+      renderWithProviders(<JournalPage />);
+
+      // The first tail read is immediate: no timer is needed to reach 51, 52.
+      await waitFor(() => expect(renderedSeqs()).toEqual([51, 52]), {
+        timeout: 5000,
+      });
+      expect(cursors.slice(0, 2)).toEqual([0, 50]);
+    }, 15000);
+  });
+
   // RC-3: error-retry and trim-notice tests
   describe("accumulator — error-retry and trim-notice", () => {
     test("error-retry: initial 500 shows retry button, then renders events after retry", async () => {
