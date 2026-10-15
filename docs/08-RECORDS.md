@@ -584,6 +584,13 @@ CREATE INDEX IF NOT EXISTS idx_record_revisions_record
 
 Do not add `project_id` to these tables.
 
+Later migrations add three nullable columns to `record_revisions`: `token_id`,
+`source` and `source_version` (migration 14), and `principal_id` (migration 43).
+`principal_id` is the authenticated principal that wrote the revision and
+`token_id` the credential that signed it; revisions written before migration 43
+keep `principal_id = NULL` and are never backfilled. `actor` stays the display
+attribution. See [04-PERSISTENCE-SCHEMA](04-PERSISTENCE-SCHEMA.md#record-revision-authorship-530-project-migration-43).
+
 `record_revisions.operation` must be one of:
 
 ```text
@@ -1363,6 +1370,8 @@ Response:
       "canonical_artifact_key": "record-snapshots/...",
       "source_artifact_key": null,
       "actor": "agent-a",
+      "principal_id": "service:0f9a2c1e-6b1d-4f6e-9c52-1f0a7d1f3a10",
+      "token_id": "5f0f4a5e-7d57-4d9c-9c36-3f4a4c1a6b11",
       "created_at": 1779090000000,
       "message": "apply patch"
     }

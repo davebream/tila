@@ -22,6 +22,8 @@ erDiagram
     journal }o--o{ entities : "resource string (audit)"
     journal }o--o{ artifact_pointers : "resource string (audit)"
 
+    records ||--o{ record_revisions : "type / key"
+
     %% --- global D1 tables ---
     _projects ||--o{ _tokens : "project_id"
     _projects }o--o{ entities : "PROJECT_ID = DO name"
@@ -87,6 +89,25 @@ erDiagram
         text token_id "credential audit"
         int fence
         json data "event payload"
+    }
+
+    records {
+        text type PK
+        text key PK
+        int revision "current revision"
+        int archived
+        text updated_by "display attribution"
+    }
+
+    record_revisions {
+        text type PK_FK
+        text key PK_FK
+        int revision PK
+        text operation "created set patch archived unarchived"
+        text actor "display attribution, unchanged"
+        text principal_id "authenticated author, NULL before migration 43"
+        text token_id "signing credential, NULL for sessions"
+        int created_at
     }
 
     claims {
@@ -326,6 +347,36 @@ UPDATEs on the reviewed revision. These columns are not in the D1 backup column
 allowlist, so restored rows start again at revision 1. `_runtime_invitations` gains
 a public `invitation_id` (the bearer hash stays the primary key and is never
 listed), `created_at` and explicit revocation fields.
+
+### Record revision authorship (#530, project migration 43)
+
+`record_revisions.principal_id` is nullable `TEXT`: the authenticated principal
+(`user:…`, `service:…`, `github:…`, `oidc:…`, or `token:<id>` for a project token
+that has no principal of its own) that wrote the revision. Every new
+create, set, put, patch, archive and unarchive stores the request origin's
+principal in the revision's transaction. It sits beside the existing `token_id`
+(the signing credential, set since migration 14) and `actor` (display
+attribution, unchanged).
+
+- Revisions written before migration 43 keep `principal_id = NULL`. Nothing is
+  inferred or backfilled: the journal and timestamps do not identify a
+  revision's author unambiguously, so history reports `null`, not a guess.
+- `token_id` is `NULL` for browser, workspace and OIDC sessions, which have no
+  token row. A rotated credential keeps its `principal_id` and gets a new
+  `token_id`, which also separates two tokens that share a display name.
+- Record history returns both fields on every item (`null` when absent). It
+  requires `records:read`, not `journal:read`, which already returns the same two
+  identifiers. The `worker` and `read-only` presets hold both capabilities and
+  learn nothing new; a custom policy with `records:read` but not `journal:read`
+  now sees authors' principal and credential-version IDs in record history.
+  Neither value authenticates anything: token hashes never leave the server.
+- The migration is additive and idempotent (guarded `ALTER TABLE`) and is
+  shared by DO SQLite, Node and Bun embedded stores.
+- Backups include the column automatically. The semantic digest drops
+  `principal_id` for archives below migration level 43, so a backup taken at
+  level 42 or earlier, including a v0.7.0 export, restores with the digest it
+  was exported with and its revisions stay `NULL`. A backup taken at level 43
+  needs a release that supports level 43.
 
 ### Work questions (#304, project migration 36)
 
