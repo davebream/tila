@@ -305,6 +305,7 @@ const REQUIRED_TABLE_COLUMNS: Record<string, string[]> = {
     "actor",
     "created_at",
     "message",
+    "principal_id",
   ],
   record_tags: ["type", "key", "tag"],
   records: [

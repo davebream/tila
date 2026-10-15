@@ -58,7 +58,7 @@ describe("settings revision migration", () => {
       // New allocations never collide with the migrated revision 1.
       expect(nextRevision(db)).toBe(2);
       expect(nextRevision(db)).toBe(3);
-      expect(LATEST_PROJECT_MIGRATION).toBe(42);
+      expect(LATEST_PROJECT_MIGRATION).toBeGreaterThanOrEqual(42);
     } finally {
       raw.close();
     }
