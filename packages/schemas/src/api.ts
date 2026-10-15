@@ -1129,16 +1129,44 @@ export type RecordSearchResult = z.infer<typeof RecordSearchResultSchema>;
 
 // --- Unified Search API ---
 
+export const ReportSearchResultSchema = z.object({
+  seq: z.number().int().positive().safe(),
+  t: z.number().int(),
+  resource: z.string(),
+  principal_id: z.string(),
+  event_name: z.string(),
+  correlation_id: z.string().nullable(),
+  corrects_seq: z.number().int().nullable(),
+  snippet: z.string().nullable(),
+  indexed_at: z.number().int(),
+});
+export type ReportSearchResult = z.infer<typeof ReportSearchResultSchema>;
+
+export const ReportHistoryScopeSchema = z.object({
+  archived: z.literal("included"),
+  status: z.enum(["pending", "running", "complete", "failed"]),
+  indexed_through_seq: z.number().int().nonnegative().safe(),
+  target_through_seq: z.number().int().nonnegative().safe(),
+  error: z.string().optional(),
+});
+export type ReportHistoryScope = z.infer<typeof ReportHistoryScopeSchema>;
+
 export const UnifiedSearchResultSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("entity") }).merge(EntitySearchResultSchema),
   z.object({ type: z.literal("artifact") }).merge(ArtifactSearchResultSchema),
   z.object({ type: z.literal("record") }).merge(RecordSearchResultSchema),
+  z.object({ type: z.literal("report") }).merge(ReportSearchResultSchema),
 ]);
 
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 
 /** Searchable kinds. `task` results carry `type: "entity"`. */
-export const SearchKindSchema = z.enum(["task", "record", "artifact"]);
+export const SearchKindSchema = z.enum([
+  "task",
+  "record",
+  "artifact",
+  "report",
+]);
 export type SearchKind = z.infer<typeof SearchKindSchema>;
 
 export const SearchScopeSchema = z.object({
@@ -1157,6 +1185,7 @@ export const SearchScopeSchema = z.object({
     .optional(),
   /** Search never matches archived tasks or records. */
   archived: z.literal("excluded"),
+  report_history: ReportHistoryScopeSchema.optional(),
 });
 export type SearchScope = z.infer<typeof SearchScopeSchema>;
 
@@ -1201,7 +1230,7 @@ export const UnifiedSearchQuerySchema = z
       .pipe(z.number().int().min(1).max(100)),
     tag_filter: tagFilterQueryParam,
     /** Comma list of kinds to search. Defaults to every kind the caller may read. */
-    kind: commaList(3).pipe(z.array(SearchKindSchema).optional()),
+    kind: commaList(4).pipe(z.array(SearchKindSchema).optional()),
     /** Comma list of task or record types. Requires exactly one of those kinds. */
     type: commaList(20),
     cursor: ListCursorSchema.optional(),

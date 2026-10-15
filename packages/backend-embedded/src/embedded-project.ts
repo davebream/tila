@@ -48,6 +48,7 @@ import { isManagedTask } from "@tila/ops-sqlite";
 import {
   catalogOps,
   continuityOps,
+  reportSearchOps,
   searchPageOps,
   summaryOps,
 } from "@tila/ops-sqlite";
@@ -1327,7 +1328,7 @@ export class EmbeddedProject
     limit?: number;
     tagFilter?: string[];
   }): ReturnType<typeof entityOps.searchAll> {
-    return entityOps.searchAll(this.db, query);
+    return this.searchPage(query).results;
   }
 
   /** Paged, kind-scoped search with an opaque cursor (#300). Local callers are unrestricted. */
@@ -1355,8 +1356,29 @@ export class EmbeddedProject
       results: page.results,
       total: page.results.length,
       next_cursor: page.next_cursor,
-      scope: { ...scope, archived: "excluded" },
+      scope: {
+        ...scope,
+        archived: "excluded",
+        ...(scope.kinds.includes("report")
+          ? { report_history: reportSearchOps.reportHistoryScope(this.db) }
+          : {}),
+      },
     };
+  }
+
+  /** Advance one verified history window; synchronous search stays read-only. */
+  async indexReportHistoryBatch(restart = false) {
+    reportSearchOps.startReportIndex(this.db, restart);
+    return reportSearchOps.indexReportHistoryBatch(this.db, {
+      archives: this.archives,
+    });
+  }
+
+  async reindexReports() {
+    let scope = await this.indexReportHistoryBatch(true);
+    while (scope.status === "running")
+      scope = await this.indexReportHistoryBatch();
+    return scope;
   }
 
   /**

@@ -64,6 +64,8 @@ export const PROJECT_BACKUP_TABLES = [
   "artifact_search_docs",
   "entity_search_docs",
   "record_search_docs",
+  "report_search_docs",
+  "report_search_state",
   "queue_policy",
   "queue_entries",
   "work_attempts",
@@ -158,6 +160,8 @@ const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
   artifact_search_docs: ["artifact_key"],
   entity_search_docs: ["entity_id"],
   record_search_docs: ["record_type", "record_key"],
+  report_search_docs: ["seq"],
+  report_search_state: ["id"],
 };
 
 export class ProjectMaintenanceError extends Error {
@@ -246,6 +250,11 @@ export async function semanticDigest(
       ? LEGACY_DIGEST_TABLES
       : PROJECT_BACKUP_TABLES;
   for (const table of digestTables) {
+    if (
+      migrationVersion < 44 &&
+      (table === "report_search_docs" || table === "report_search_state")
+    )
+      continue;
     if (migrationVersion < 40 && table === "attempt_corrections") continue;
     if (
       migrationVersion < 36 &&
@@ -480,6 +489,7 @@ export function rebuildSearchIndexes(sql: ProjectSqlStorage): void {
     "artifact_search_docs_fts",
     "entity_search_docs_fts",
     "record_search_docs_fts",
+    "report_search_docs_fts",
   ]) {
     if (tableExists(sql, table))
       sql.exec(`INSERT INTO "${table}"("${table}") VALUES ('rebuild')`);

@@ -14,9 +14,10 @@ export function createSearchMethods(client: TilaClient, projectId: string) {
   const base = `/projects/${projectId}`;
   return {
     /**
-     * Unified search. `kind` narrows to tasks, records or artifacts; `type`
+     * Unified search. `kind` narrows to tasks, records, artifacts or reports; `type`
      * narrows one task or record kind to types; `cursor` continues from a
-     * previous `next_cursor`; `syntax: "literal"` treats `q` as plain words.
+     * previous `next_cursor`; archived reports are included and
+     * `scope.report_history` identifies incomplete historical indexing; `syntax: "literal"` treats `q` as plain words.
      */
     async search(
       q: string,

@@ -27,7 +27,11 @@ search.get("/", requirePermission("read"), async (c) => {
     cursor,
     syntax,
   } = parsed.data;
-  const query: Record<string, string> = { q, syntax };
+  const query: Record<string, string> = {
+    q,
+    syntax,
+    project_id: c.get("projectId"),
+  };
   if (limit !== undefined) query.limit = String(limit);
   if (tagFilter?.length) query.tag_filter = tagFilter.join(",");
   if (kind?.length) query.kind = kind.join(",");
@@ -54,20 +58,21 @@ search.post("/reindex", requirePermission("admin"), async (c) => {
     "/search/reindex",
     "POST",
     body,
-    undefined,
+    { project_id: c.get("projectId") },
     analyticsCtxFrom(c),
   );
 });
 
 // GET /projects/:projectId/search/reindex/status -- check reindex job status
 search.get("/reindex/status", requirePermission("admin"), async (c) => {
+  const kind = c.req.query("kind");
   const stub = c.get("doStub");
   return forwardToDO(
     stub,
     "/search/reindex/status",
     "GET",
     undefined,
-    undefined,
+    kind ? { kind } : undefined,
     analyticsCtxFrom(c),
   );
 });

@@ -1,3 +1,9 @@
+import type { EmbeddedProject } from "@tila/backend-embedded";
+import {
+  type ReportHistoryScope,
+  UnifiedSearchQuerySchema,
+  type UnifiedSearchResponse,
+} from "@tila/schemas";
 import { defineCommand } from "citty";
 import { requireClient, resolveContext } from "../context";
 import {
@@ -10,136 +16,151 @@ import {
   warning,
 } from "../lib/output";
 
+const searchArgs = {
+  query: {
+    type: "positional",
+    description: "Full-text query",
+    required: false,
+  },
+  limit: { type: "string", description: "Page size (default 20, max 100)" },
+  kind: {
+    type: "string",
+    description: "Comma-separated task,record,artifact,report",
+  },
+  cursor: { type: "string", description: "Continue from next_cursor" },
+  ...jsonArg,
+} as const;
+
+async function runSearch(args: {
+  query?: string;
+  limit?: string;
+  kind?: string;
+  cursor?: string;
+  json?: boolean;
+}) {
+  const parsed = UnifiedSearchQuerySchema.safeParse({
+    q: args.query,
+    limit: args.limit,
+    kind: args.kind,
+    cursor: args.cursor,
+  });
+  if (!parsed.success) {
+    diagnostic(parsed.error.message);
+    exit(1);
+    return;
+  }
+  const query = parsed.data;
+  const ctx = await resolveContext();
+  let response: UnifiedSearchResponse;
+  if (ctx.config.backend === "local") {
+    const project = ctx.entity as unknown as EmbeddedProject;
+    if (!query.kind || query.kind.includes("report"))
+      await project.indexReportHistoryBatch();
+    response = project.searchPage({
+      q: query.q,
+      limit: query.limit,
+      kinds: query.kind,
+      cursor: query.cursor,
+    });
+  } else {
+    response = await requireClient(ctx).get<UnifiedSearchResponse>(
+      `/projects/${ctx.config.project_id}/search`,
+      {
+        query: {
+          q: query.q,
+          limit: String(query.limit),
+          ...(query.kind ? { kind: query.kind.join(",") } : {}),
+          ...(query.cursor ? { cursor: query.cursor } : {}),
+        },
+      },
+    );
+  }
+  if (args.json) {
+    printJson(response);
+    return;
+  }
+  const history = response.scope?.report_history;
+  if (history && history.status !== "complete")
+    warning(
+      `Report history indexing ${history.status}: verified through ${history.indexed_through_seq} of ${history.target_through_seq}${history.error ? ` (${history.error})` : ""}. Results may be incomplete.`,
+    );
+  if (!response.results.length) outputText("No results found.");
+  for (const r of boundedItems(response.results)) {
+    let label: string;
+    switch (r.type) {
+      case "entity":
+        label = `${r.entity_id}  [task] ${r.entity_type}${r.name ? `  ${r.name}` : ""}`;
+        break;
+      case "artifact":
+        label = `${r.r2_key}  [artifact] ${r.kind}${r.title ? `  ${r.title}` : ""}`;
+        break;
+      case "record":
+        label = `${r.record_type}/${r.record_key}  [record]`;
+        break;
+      case "report":
+        label = `#${r.seq}  [report] ${r.event_name}  ${r.resource}  ${r.principal_id}${r.corrects_seq !== null ? `  corrects #${r.corrects_seq}` : ""}`;
+        break;
+    }
+    outputText(`${label}${r.snippet ? `\n  ${r.snippet}` : ""}`);
+  }
+  if (response.next_cursor)
+    outputText(`Next page: --cursor ${response.next_cursor}`);
+}
+
 const queryCommand = defineCommand({
   meta: {
     name: "search",
-    description: "Unified full-text search across entities and artifacts",
+    description: "Search tasks, records, artifacts and reports",
   },
-  args: {
-    query: {
-      type: "positional",
-      description:
-        "Search query (FTS5 syntax; lexical match, per-project only)",
-      required: true,
-    },
-    limit: {
-      type: "string",
-      description:
-        "Maximum number of results to return (default: 20, max: 100)",
-    },
-    ...jsonArg,
-  },
-  async run({ args }) {
-    const ctx = await resolveContext();
-    const q = args.query as string;
-    const limit = args.limit ? Number(args.limit) : undefined;
-
-    type SearchResult = {
-      type: string;
-      entity_id?: string;
-      entity_type?: string;
-      r2_key?: string;
-      kind?: string;
-      name?: string | null;
-      title?: string | null;
-      snippet?: string | null;
-    };
-
-    let results: SearchResult[];
-
-    if (ctx.config.backend === "local") {
-      // Local mode: call searchAll via the LocalProject instance directly.
-      // The context.entity is a LocalProject in local mode -- cast to access search methods.
-      const localProject = ctx.entity as unknown as {
-        searchAll: (query: { q: string; limit?: number }) => SearchResult[];
-      };
-      if (typeof localProject.searchAll !== "function") {
-        diagnostic(
-          "Error: unified search requires local backend with search support",
-        );
-        exit(1);
-      }
-      const raw = localProject.searchAll({ q, limit });
-      results = raw;
-    } else {
-      // Remote mode: call the Worker unified search endpoint directly via client.
-      const remote = requireClient(ctx);
-      const response = (await remote.get(
-        `/projects/${ctx.config.project_id}/search`,
-        {
-          query: { q, ...(limit ? { limit: String(limit) } : {}) },
-        },
-      )) as { ok: boolean; results: SearchResult[] };
-      results = response.results;
-    }
-
-    if (args.json) {
-      printJson({ results });
-      return;
-    }
-
-    if (results.length === 0) {
-      outputText("No results found.");
-      return;
-    }
-
-    for (const r of boundedItems(results)) {
-      const id = r.type === "entity" ? r.entity_id : r.r2_key;
-      const label =
-        r.type === "entity"
-          ? `[entity] ${r.entity_type}`
-          : `[artifact] ${r.kind}`;
-      const name = r.type === "entity" ? r.name : r.title;
-      const nameStr = name ? `  ${name}` : "";
-      const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-      outputText(`${id}  ${label}${nameStr}${snippet}`);
-    }
-  },
+  args: searchArgs,
+  run: ({ args }) => runSearch(args),
 });
 
 const reindexCommand = defineCommand({
   meta: {
     name: "reindex",
     description:
-      "Trigger a batched FTS reindex for artifacts, entities, or both",
+      "Trigger a batched FTS reindex for artifacts, entities, and reports",
   },
   args: {
     kind: {
       type: "string",
-      description: "Which kind to reindex: 'artifact' or 'entity'",
+      description: "Which kind to reindex: 'artifact', 'entity', or 'report'",
     },
     all: {
       type: "boolean",
       description:
-        "Reindex both artifacts and entities (default when no --kind given)",
+        "Reindex artifacts, entities and reports (default when no --kind given)",
       default: false,
     },
   },
   async run({ args }) {
     const ctx = await resolveContext();
 
-    const kindsToReindex: Array<"artifact" | "entity"> = [];
+    const kindsToReindex: Array<"artifact" | "entity" | "report"> = [];
 
     if (args.kind === "artifact") {
       kindsToReindex.push("artifact");
     } else if (args.kind === "entity") {
       kindsToReindex.push("entity");
+    } else if (args.kind === "report") {
+      kindsToReindex.push("report");
     } else if (args.all || !args.kind) {
-      // Default: reindex both
-      kindsToReindex.push("artifact", "entity");
+      // Default: reindex every supported kind.
+      kindsToReindex.push("artifact", "entity", "report");
     } else {
       diagnostic(
-        `Error: invalid kind '${args.kind}'. Use 'artifact' or 'entity'.`,
+        `Error: invalid kind '${args.kind}'. Use 'artifact', 'entity', or 'report'.`,
       );
       exit(1);
       return;
     }
 
     if (ctx.config.backend === "local") {
-      // Local mode: run a synchronous full FTS reindex via the EmbeddedProject
-      // backend (no DO Alarms locally). `ctx.entity` is the EmbeddedProject;
-      // duck-type to its `reindexSearch` method (same pattern as `searchAll`).
+      // Local report history can require asynchronous archive reads. Other
+      // indexes retain the synchronous EmbeddedProject reindex method.
       const local = ctx.entity as unknown as {
+        reindexReports: () => Promise<ReportHistoryScope>;
         reindexSearch?: (kind: "artifact" | "entity" | "all") => {
           artifact: number;
           entity: number;
@@ -154,6 +175,18 @@ const reindexCommand = defineCommand({
       }
       for (const kind of kindsToReindex) {
         outputText(`Starting reindex for kind: ${kind}...`);
+        if (kind === "report") {
+          const scope = await local.reindexReports();
+          if (scope.status === "failed") {
+            diagnostic(`Report indexing failed: ${scope.error}`);
+            exit(1);
+            return;
+          }
+          outputText(
+            `Reindex complete for report through sequence ${scope.indexed_through_seq}.`,
+          );
+          continue;
+        }
         const counts = local.reindexSearch(kind);
         outputText(
           `Reindex complete for ${kind}. Indexed ${counts[kind]} rows.`,
@@ -183,21 +216,36 @@ const reindexCommand = defineCommand({
       while (attempts < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        const statusResp = (await remote.get(statusPath)) as {
+        const statusResp = (await remote.get(statusPath, {
+          query: { kind },
+        })) as {
           ok: boolean;
-          status: "idle" | "running";
+          status: "idle" | "running" | "complete" | "failed";
+          report_history?: ReportHistoryScope;
+          reason?: string;
           kind?: string;
           processed?: number;
         };
 
-        if (statusResp.status === "idle") {
+        if (statusResp.status === "failed") {
+          diagnostic(
+            `Reindex failed for ${kind}: ${statusResp.report_history?.error ?? statusResp.reason ?? "unknown error"}`,
+          );
+          exit(1);
+          return;
+        }
+        if (statusResp.status === "idle" || statusResp.status === "complete") {
           outputText(`Reindex complete for ${kind}.`);
           break;
         }
 
         if (statusResp.status === "running") {
-          const processed = statusResp.processed ?? 0;
-          outputText(`  ${kind}: processed ${processed} rows so far...`);
+          const history = statusResp.report_history;
+          outputText(
+            history
+              ? `  report: verified through ${history.indexed_through_seq} of ${history.target_through_seq} sequences...`
+              : `  ${kind}: processed ${statusResp.processed ?? 0} rows so far...`,
+          );
         }
 
         attempts++;
@@ -213,96 +261,8 @@ const reindexCommand = defineCommand({
 });
 
 export default defineCommand({
-  meta: {
-    name: "search",
-    description: "Search and reindex operations",
-  },
-  subCommands: {
-    query: queryCommand,
-    reindex: reindexCommand,
-  },
-  args: {
-    query: {
-      type: "positional",
-      description:
-        "Search query (FTS5 syntax; lexical match, per-project only)",
-      required: false,
-    },
-    limit: {
-      type: "string",
-      description:
-        "Maximum number of results to return (default: 20, max: 100)",
-    },
-    ...jsonArg,
-  },
-  async run({ args }) {
-    const ctx = await resolveContext();
-    const q = args.query as string | undefined;
-
-    if (!q || q.trim() === "") {
-      diagnostic(
-        "Usage: tila search <query>\n       tila search reindex [--kind artifact|entity] [--all]",
-      );
-      exit(1);
-    }
-
-    const limit = args.limit ? Number(args.limit) : undefined;
-
-    type SearchResult = {
-      type: string;
-      entity_id?: string;
-      entity_type?: string;
-      r2_key?: string;
-      kind?: string;
-      name?: string | null;
-      title?: string | null;
-      snippet?: string | null;
-    };
-
-    let results: SearchResult[];
-
-    if (ctx.config.backend === "local") {
-      const localProject = ctx.entity as unknown as {
-        searchAll: (query: { q: string; limit?: number }) => SearchResult[];
-      };
-      if (typeof localProject.searchAll !== "function") {
-        diagnostic(
-          "Error: unified search requires local backend with search support",
-        );
-        exit(1);
-      }
-      const raw = localProject.searchAll({ q, limit });
-      results = raw;
-    } else {
-      const response = (await requireClient(ctx).get(
-        `/projects/${ctx.config.project_id}/search`,
-        {
-          query: { q, ...(limit ? { limit: String(limit) } : {}) },
-        },
-      )) as { ok: boolean; results: SearchResult[] };
-      results = response.results;
-    }
-
-    if (args.json) {
-      printJson({ results });
-      return;
-    }
-
-    if (results.length === 0) {
-      outputText("No results found.");
-      return;
-    }
-
-    for (const r of boundedItems(results)) {
-      const id = r.type === "entity" ? r.entity_id : r.r2_key;
-      const label =
-        r.type === "entity"
-          ? `[entity] ${r.entity_type}`
-          : `[artifact] ${r.kind}`;
-      const name = r.type === "entity" ? r.name : r.title;
-      const nameStr = name ? `  ${name}` : "";
-      const snippet = r.snippet ? `\n  ${r.snippet}` : "";
-      outputText(`${id}  ${label}${nameStr}${snippet}`);
-    }
-  },
+  meta: { name: "search", description: "Search and reindex operations" },
+  subCommands: { query: queryCommand, reindex: reindexCommand },
+  args: searchArgs,
+  run: ({ args }) => runSearch(args),
 });

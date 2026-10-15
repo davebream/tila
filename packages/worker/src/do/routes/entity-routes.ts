@@ -5,6 +5,7 @@ import {
   assertResourceAccess,
   filterRelationships,
   readCredentialPolicy,
+  reportSearchOps,
 } from "@tila/ops-sqlite";
 import {
   type RequestOrigin,
@@ -33,6 +34,7 @@ import {
 import { eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { ZodError, z } from "zod";
+import { scheduleReportIndex } from "../report-search-job";
 import { filterFields } from "./entity-response";
 import { originFromBody } from "./origin";
 import {
@@ -560,7 +562,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
     }
   });
 
-  app.get("/search", (c) => {
+  app.get("/search", async (c) => {
     const { db } = deps;
     const q = c.req.query("q");
     if (!q || q.trim() === "") {
@@ -603,6 +605,9 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
 
     try {
       const scope = searchPageOps.searchableKinds(policy, requestedKinds);
+      if (scope.kinds.includes("report"))
+        await scheduleReportIndex(deps, c.req.query("project_id"));
+      // Results and coverage must be read together after scheduling yields.
       const page =
         scope.kinds.length === 0
           ? { results: [], next_cursor: null }
@@ -621,7 +626,13 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         results: page.results,
         total: page.results.length,
         next_cursor: page.next_cursor,
-        scope: { ...scope, archived: "excluded" as const },
+        scope: {
+          ...scope,
+          archived: "excluded" as const,
+          ...(scope.kinds.includes("report")
+            ? { report_history: reportSearchOps.reportHistoryScope(db) }
+            : {}),
+        },
       });
     } catch (err) {
       if (err instanceof artifactOps.SearchQueryError) {

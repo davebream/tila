@@ -60,6 +60,8 @@ export const DOMAIN_TABLE_NAMES = [
   "artifact_search_docs",
   "entity_search_docs",
   "record_search_docs",
+  "report_search_docs",
+  "report_search_state",
   "entity_tags",
   "artifact_tags",
 ] as const;
@@ -98,6 +100,8 @@ export function countStoreRows(
 ): StoreCountsResult {
   return {
     domain: {
+      report_search_docs: countTable(db, "report_search_docs"),
+      report_search_state: countTable(db, "report_search_state"),
       queue_policy: countTable(db, "queue_policy"),
       queue_entries: countTable(db, "queue_entries"),
       work_attempts: countTable(db, "work_attempts"),

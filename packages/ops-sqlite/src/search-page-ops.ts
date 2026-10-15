@@ -28,6 +28,7 @@ import {
   fingerprint,
 } from "./list-cursor";
 import { searchRecords } from "./record-ops";
+import { searchReports } from "./report-search-ops";
 import type * as schema from "./schema";
 
 type DB = BaseSQLiteDatabase<"sync", unknown, typeof schema>;
@@ -37,6 +38,7 @@ export const SEARCH_KINDS: readonly SearchKind[] = [
   "task",
   "artifact",
   "record",
+  "report",
 ];
 
 /** Deepest offset a cursor may reach per kind. */
@@ -110,6 +112,11 @@ function fetchKind(
         types: query.types,
         restrictions: query.restrictions,
       }).map((row) => ({ type: "record" as const, ...row }));
+    case "report":
+      return searchReports(db, common).map((row) => ({
+        type: "report" as const,
+        ...row,
+      }));
     case "artifact":
       return searchArtifacts(db, common).map((row) => ({
         type: "artifact" as const,
@@ -132,7 +139,7 @@ export function searchPage(db: DB, query: SearchPageQuery): SearchPage {
     tagFilter: query.tagFilter?.map((t) => t.toLowerCase()).sort() ?? null,
   });
 
-  const offsets: Offsets = { task: 0, record: 0, artifact: 0 };
+  const offsets: Offsets = { task: 0, record: 0, artifact: 0, report: 0 };
   if (query.cursor) {
     const position = decodeCursor(query.cursor, binding);
     const stored = position.o as Record<string, unknown> | undefined;
@@ -203,6 +210,7 @@ const KIND_CAPABILITY: Record<SearchKind, string> = {
   task: "tasks:read",
   record: "records:read",
   artifact: "artifacts:read",
+  report: "journal:read",
 };
 
 export class SearchKindDenied extends Error {
@@ -237,7 +245,7 @@ export function searchableKinds(
     const reason =
       policy === undefined
         ? undefined
-        : restricted && kind === "artifact"
+        : restricted && (kind === "artifact" || kind === "report")
           ? ("restricted" as const)
           : !policy.capabilities.includes(KIND_CAPABILITY[kind])
             ? ("capability" as const)

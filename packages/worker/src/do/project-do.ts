@@ -12,6 +12,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { runMigrationsWithPitrRollback } from "./migration-runner";
 import { createProjectRouter } from "./project-do-router";
+import { drainReportIndex } from "./report-search-job";
 import { drainArtifactLifecycle } from "./routes/artifact-lifecycle-routes";
 import {
   flushArtifactCommits,
@@ -89,6 +90,8 @@ export class ProjectDO extends DurableObject {
    */
   async alarm(): Promise<void> {
     if (projectTransferOps.getTransferState(this.ctx.storage.sql)) {
+      if (await this.ctx.storage.get("_report_search_job"))
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
       if (
         artifactVersionOps.listPendingArtifactCommits(this.db, 1).length ||
         artifactLifecycleOps.hasLifecycleWork(this.db)
@@ -117,6 +120,7 @@ export class ProjectDO extends DurableObject {
       console.error("Artifact commit publication failed", error);
       await scheduleArtifactPublication(artifactDeps);
     }
+    await drainReportIndex(artifactDeps);
     const state = await this.ctx.storage.get<ReindexState>(REINDEX_KV_KEY);
     if (!state) {
       // No pending reindex -- no-op
