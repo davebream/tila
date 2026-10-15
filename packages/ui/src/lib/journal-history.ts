@@ -82,6 +82,41 @@ export function olderWindow(
   return { after: through - Math.min(HISTORY_PAGE_SPAN, through), through };
 }
 
+/**
+ * Gaps up to this many sequences close on their own. A burst can move the live
+ * view's first row far past where history ends, and a sparse filter can make
+ * that many sequences hold almost no events; past this the operator chooses.
+ */
+export const AUTO_FILL_SPAN = HISTORY_PAGE_SPAN * 5;
+
+/**
+ * The sequences between the top of the history and the first row of the live
+ * view. The live tail prunes (or reseeds) on its own schedule, so its first row
+ * only ever moves up; whatever it passed is in neither list until read through
+ * replay. Null while the two meet, or when the live view had no row to anchor to.
+ */
+export function liveGap(
+  ceiling: number | null,
+  anchoredToRow: boolean,
+  liveLow: number | null,
+): { from: number; through: number } | null {
+  if (ceiling === null || !anchoredToRow || liveLow === null) return null;
+  return liveLow > ceiling + 1
+    ? { from: ceiling + 1, through: liveLow - 1 }
+    : null;
+}
+
+/** The next replay window upward through `gap`, at most one page. */
+export function gapWindow(gap: { from: number; through: number }): {
+  after: number;
+  through: number;
+} {
+  return {
+    after: gap.from - 1,
+    through: Math.min(gap.through, gap.from - 1 + HISTORY_PAGE_SPAN),
+  };
+}
+
 /** True while a whole further page still fits under the cap. */
 export function hasRoomForPage(held: number): boolean {
   return held + HISTORY_PAGE_SPAN <= HISTORY_MAX_ROWS;

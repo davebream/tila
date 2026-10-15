@@ -327,7 +327,7 @@ const EventRow = memo(function EventRow({ event }: { event: JournalEvent }) {
 });
 
 export function JournalPage() {
-  const { projectId } = useAuth();
+  const { projectId, capabilities } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -553,15 +553,19 @@ export function JournalPage() {
       filterCorrelation,
     ],
   );
+  const liveLow = events.length > 0 ? events[0].seq : null;
   const history = useJournalHistory({
     projectId,
     filters: historyFilters,
     readAnchor: () =>
-      events.length > 0
-        ? { seq: events[0].seq, fromRow: true }
+      liveLow !== null
+        ? { seq: liveLow, fromRow: true }
         : { seq: lastSeqRef.current + 1, fromRow: false },
+    liveLow,
+    // A fresh session snapshot (step-up, role change, project re-selection)
+    // is a new credential as far as "may not read history" is concerned.
+    credential: capabilities,
   });
-  const liveLow = events.length > 0 ? events[0].seq : null;
   // History sits below the live view; a row the tail now shows is not repeated.
   const historyRows = useMemo(
     () =>
@@ -570,12 +574,6 @@ export function JournalPage() {
         : history.rows.filter((row) => row.seq < liveLow),
     [history.rows, liveLow],
   );
-  // The tail prunes (or reseeds) independently, so its first row can move past
-  // where history began. Say so rather than show a silent hole.
-  const historyGap =
-    history.anchor?.fromRow && liveLow !== null && liveLow > history.anchor.seq
-      ? { from: history.anchor.seq, through: liveLow - 1 }
-      : null;
 
   const loadError = initialQuery.isError ? initialQuery.error : null;
   const initialLoaded = initialQuery.isSuccess;
@@ -755,7 +753,6 @@ export function JournalPage() {
         <JournalHistoryControl
           history={history}
           filtered={hasActiveFilters(historyFilters)}
-          gap={historyGap}
         />
       )}
 

@@ -4,13 +4,6 @@ import { HISTORY_MAX_ROWS } from "@/lib/journal-history";
 
 const count = (value: number) => value.toLocaleString("en-US");
 
-/**
- * Sequences the live view trimmed after history was loaded. The history below
- * ends at `from - 1` and the live view now starts at `through + 1`, so these
- * are in neither list until the history is cleared and read again.
- */
-export type HistoryGap = { from: number; through: number };
-
 function summary(history: JournalHistory, filtered: boolean): string {
   if (history.covered === null) {
     return history.loading
@@ -25,7 +18,7 @@ function summary(history: JournalHistory, filtered: boolean): string {
     ? `${count(history.rows.length)} match the active filters`
     : `${count(history.rows.length)} events loaded`;
   const tail = history.loading
-    ? " · Loading older events…"
+    ? " · Reading history…"
     : history.done
       ? " · Reached the first event."
       : history.full
@@ -42,28 +35,37 @@ function summary(history: JournalHistory, filtered: boolean): string {
 export function JournalHistoryControl({
   history,
   filtered,
-  gap,
 }: {
   history: JournalHistory;
   /** Whether any filter is active, so matches are counted against the scan. */
   filtered: boolean;
-  gap: HistoryGap | null;
 }) {
   if (history.restricted) {
     return (
-      <output
-        className="block font-mono text-[11px] text-fg-faint"
+      <div
+        className="flex flex-wrap items-center gap-2"
         data-testid="journal-history-restricted"
       >
-        Older history needs journal read access, which this credential does not
-        have. The live tail is unaffected.
-      </output>
+        <output className="block font-mono text-[11px] text-fg-faint">
+          Older history needs journal read access, which this credential does
+          not have. The live tail is unaffected.
+        </output>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={history.loading}
+          onClick={history.retryAccess}
+        >
+          Check access again
+        </Button>
+      </div>
     );
   }
 
   const engaged = history.anchor !== null;
   const canLoad = !history.done && !history.full;
-  const { problem } = history;
+  const { problem, gap } = history;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -96,12 +98,26 @@ export function JournalHistoryControl({
         </output>
       </div>
 
-      {gap && (
-        <output className="block font-mono text-[11px] text-status-amber">
-          Sequences #{count(gap.from)} to #{count(gap.through)} are not shown:
-          the live view trimmed them after this history was loaded. Clear
-          history and load older again to include them.
-        </output>
+      {gap && !history.fillsItself && (
+        <div className="flex flex-wrap items-center gap-2">
+          <output className="block font-mono text-[11px] text-status-amber">
+            Sequences #{count(gap.from)} to #{count(gap.through)} sit between
+            this history and the live view: the live view moved past them after
+            the history was loaded.
+            {history.full && " The buffer is full: clear history to read them."}
+          </output>
+          {!history.full && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={history.loading}
+              onClick={history.fillGap}
+            >
+              Load trimmed events
+            </Button>
+          )}
+        </div>
       )}
 
       {problem && (
@@ -115,7 +131,7 @@ export function JournalHistoryControl({
             {problem.kind === "invalid-cursor" &&
               "The history position is no longer valid, so no older events were loaded. Restart history to read from the live view again."}
             {problem.kind === "failed" &&
-              `Could not load older events: ${problem.message}`}
+              `Could not read journal history: ${problem.message}`}
           </span>
           {problem.kind === "invalid-cursor" ? (
             <Button
@@ -132,7 +148,7 @@ export function JournalHistoryControl({
               variant="ghost"
               size="sm"
               disabled={history.loading}
-              onClick={history.loadOlder}
+              onClick={history.retry}
             >
               Retry
             </Button>
