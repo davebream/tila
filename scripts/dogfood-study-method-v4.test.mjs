@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import {
   ACCEPT_RUNNER_SOURCE,
   allScenarios,
@@ -17,13 +19,14 @@ import {
 } from "./dogfood-study-lib.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const paths = {
-  protocol: "docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v1.md",
-  rubric: "docs/evidence/issue-194-rubric-v4-draft-v1.json",
-  inventory: "docs/evidence/issue-194-service-inventory-v4-draft-v1.json",
-  comparator: "docs/evidence/issue-194-comparator-v4-draft-v1.json",
-  declaration: "docs/evidence/issue-194-declaration-v4-draft-v1.json",
-};
+const draftPaths = (revision) => ({
+  protocol: `docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v${revision}.md`,
+  rubric: `docs/evidence/issue-194-rubric-v4-draft-v${revision}.json`,
+  inventory: `docs/evidence/issue-194-service-inventory-v4-draft-v${revision}.json`,
+  comparator: `docs/evidence/issue-194-comparator-v4-draft-v${revision}.json`,
+  declaration: `docs/evidence/issue-194-declaration-v4-draft-v${revision}.json`,
+});
+const paths = draftPaths(2);
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 const readJson = (path) => JSON.parse(read(path));
 const hash = (value) => sha256Text(canonicalJson(value));
@@ -76,7 +79,41 @@ const history = {
     "0200909552c751545a6c940f86434b2e2860d69f582b14fd89f64bcb06965343",
 };
 
-function loadDraft() {
+const previousDraft = {
+  draft_revision: 1,
+  meaning:
+    "Retained source identities only; revision 1 remains unchanged and is not execution evidence.",
+  artifacts: {
+    protocol: {
+      path: "docs/14-DOGFOOD-STUDY-PROTOCOL-v4-draft-v1.md",
+      sha256:
+        "2fc2777a8ccc22d376f53bfb2331fda79847ef4ed9c4b5e930fea31627c71b61",
+    },
+    rubric: {
+      path: "docs/evidence/issue-194-rubric-v4-draft-v1.json",
+      sha256:
+        "45e685adaa773ce92df9866a6fe83dbbbe36a695a1bd743dd63fe6a0ba57d069",
+    },
+    inventory: {
+      path: "docs/evidence/issue-194-service-inventory-v4-draft-v1.json",
+      sha256:
+        "787040d7305862982d2638ebeb9fda9b0035b0c4e74b3712d58f54a1cff16976",
+    },
+    comparator: {
+      path: "docs/evidence/issue-194-comparator-v4-draft-v1.json",
+      sha256:
+        "6a20475e348a9bb7098bef6397496a6c3af8dc19689aa45e1f666bc510dd02e3",
+    },
+    declaration: {
+      path: "docs/evidence/issue-194-declaration-v4-draft-v1.json",
+      sha256:
+        "a5aa63cbb76ccc952cc83f435bff18fe706f0e285399599755268bed1cce9a6e",
+    },
+  },
+};
+
+function loadDraft(revision = 2) {
+  const paths = draftPaths(revision);
   const raw = Object.fromEntries(
     Object.entries(paths).map(([key, path]) => [key, read(path)]),
   );
@@ -114,8 +151,94 @@ function fixtureComponents() {
   };
 }
 
+// These trusted source expressions run with fabricated values only. No SDK/database,
+// subject, native tool, runtime hook or installed service is invoked or validated.
+function sourceNodes(path, predicate, parent) {
+  const nodes = [];
+  function visit(node) {
+    if (predicate(node)) nodes.push(node);
+    ts.forEachChild(node, visit);
+  }
+  visit(
+    parent ??
+      ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true),
+  );
+  return nodes;
+}
+function only(nodes) {
+  assert.equal(nodes.length, 1, "expected one pinned source expression");
+  return nodes[0];
+}
+function renewalSourceMapping() {
+  const adapter = "packages/sdk/src/local/resource-adapters.ts";
+  const factory = only(
+    sourceNodes(
+      adapter,
+      (node) =>
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === "createLocalClaimMethods",
+    ),
+  );
+  const renew = only(
+    sourceNodes(
+      adapter,
+      (node) => ts.isMethodDeclaration(node) && node.name.getText() === "renew",
+      factory,
+    ),
+  );
+  const returned = only(
+    sourceNodes(adapter, ts.isReturnStatement, renew),
+  ).expression;
+  assert.ok(ts.isObjectLiteralExpression(returned));
+  const forwarded = only(
+    sourceNodes(
+      adapter,
+      (node) =>
+        ts.isCallExpression(node) &&
+        node.expression.getText() === "project.renew",
+      renew,
+    ),
+  );
+  assert.deepEqual(
+    forwarded.arguments.map((arg) => arg.getText()),
+    ["resource", "fence", "ttlMs"],
+  );
+  const facade = runInNewContext(`(${returned.getText()})`, {
+    result: { renewed: true, expires_at: 123456 },
+  });
+  const wrapper = "scripts/dogfood-study-sdk.ts";
+  const branch = only(
+    sourceNodes(
+      wrapper,
+      (node) =>
+        ts.isCaseClause(node) &&
+        ts.isStringLiteral(node.expression) &&
+        node.expression.text === "renew",
+    ),
+  );
+  const stringify = only(
+    sourceNodes(
+      wrapper,
+      (node) =>
+        ts.isCallExpression(node) &&
+        node.expression.getText() === "JSON.stringify",
+      branch,
+    ),
+  );
+  const expression = only([...stringify.arguments]);
+  assert.ok(ts.isObjectLiteralExpression(expression));
+  const payload = JSON.parse(
+    runInNewContext(`JSON.stringify(${expression.getText()})`, {
+      result: facade,
+      rest: ["task:example"],
+    }),
+  );
+  return { facade: JSON.parse(JSON.stringify(facade)), payload };
+}
+
 // Test-only validation: deliberately separate from the v3 runner/decoder and freeze commands.
-function validate(draft) {
+function validate(draft, revision = 2) {
+  const paths = draftPaths(revision);
   const errors = [];
   const { declaration: d, rubric: r, inventory: i, comparator: c } = draft;
   const equal = (name, actual, expected) => {
@@ -129,7 +252,7 @@ function validate(draft) {
   equal(
     "declaration schema",
     d.schema,
-    "tila.dogfood.method-declaration/4-draft-1",
+    `tila.dogfood.method-declaration/4-draft-${revision}`,
   );
   equal("declaration kind", d.kind, "prospective_method_draft");
   equal(
@@ -162,6 +285,7 @@ function validate(draft) {
       "fixture_components",
       "declaration_sha256",
       "provider_reference_source",
+      ...(revision === 2 ? ["previous_draft"] : []),
     ].sort(),
   );
   equal(
@@ -173,7 +297,7 @@ function validate(draft) {
       r.rubric_version,
       r.draft_revision,
     ],
-    [194, 4, 1, 4, 1],
+    [194, 4, revision, 4, revision],
   );
   for (const [key, schema] of Object.entries({
     rubric: "rubric",
@@ -183,13 +307,57 @@ function validate(draft) {
     equal(
       `${key} schema`,
       draft[key].schema,
-      `tila.dogfood.${schema}/4-draft-1`,
+      `tila.dogfood.${schema}/4-draft-${revision}`,
     );
     equal(`${key} issue`, draft[key].issue, 194);
   }
   for (const key of ["protocol", "rubric", "inventory", "comparator"]) {
     equal(`${key} path`, d.artifacts[key]?.path, paths[key]);
     equal(`${key} bytes`, d.artifacts[key]?.sha256, sha256Text(draft.raw[key]));
+  }
+  if (revision === 2) {
+    equal("previous draft identity", d.previous_draft, previousDraft);
+    for (const { path, sha256 } of Object.values(previousDraft.artifacts))
+      equal(`retain revision 1 ${path}`, sha256Text(read(path)), sha256);
+    for (const path of [
+      "packages/sdk/src/local/index.ts",
+      "packages/sdk/src/local/resource-adapters.ts",
+      "packages/backend-embedded/src/embedded-project.ts",
+      "packages/ops-sqlite/src/coordination-ops.ts",
+    ])
+      equal(
+        `renewal source identity ${path}`,
+        d.provider_reference_source.files[path],
+        sha256Text(read(path)),
+      );
+    equal(
+      "renewal serialized shape",
+      i.operations.find((row) => row.id === "sdk-renew")?.result_shape,
+      `{${Object.keys(renewalSourceMapping().payload)
+        .map((key) => (key === "ok" ? "ok:true" : key))
+        .join(",")}}`,
+    );
+    const localIds = [
+      "helper-acquire",
+      "helper-transfer",
+      "handoff-file",
+      "resume-file",
+      "markdown-notes",
+      "git-edit-test",
+    ];
+    equal("local recipe labels", i.worker_local_recipes?.ids, localIds);
+    for (const id of localIds) {
+      const row = i.operations.find((row) => row.id === id);
+      require(`${id} local recipe`, row?.replacement_recipe.startsWith(
+        `ordinary worker-local recipe (${id}): `,
+      ));
+      equal(
+        `${id} local provider`,
+        row?.provider,
+        "worker local tools; no service route",
+      );
+      equal(`${id} no provider verb`, row?.provider_operation_tokens, []);
+    }
   }
   equal("history identities", d.preserved_history, history);
   for (const [name, expectedHash] of Object.entries(history)) {
@@ -570,5 +738,55 @@ test("v4 protocol local links resolve without external access", () => {
     assert.ok(
       readFileSync(resolve(root, dirname(paths.protocol), match[1])).length > 0,
     );
+  }
+});
+
+test("retained v4 revision 1 keeps its original bytes and identity checks, not renewal correctness", () => {
+  assert.deepEqual(validate(loadDraft(1), 1), []);
+  for (const { path, sha256 } of Object.values(previousDraft.artifacts))
+    assert.equal(sha256Text(read(path)), sha256, path);
+});
+
+test("renewal source-expression serialization omits undefined fence while forwarding caller fence", () => {
+  const { facade, payload } = renewalSourceMapping();
+  assert.deepEqual(facade, { ok: true, expires_at: 123456 });
+  assert.deepEqual(payload, {
+    ok: true,
+    resource: "task:example",
+    expires_at: 123456,
+  });
+  assert.equal(Object.hasOwn(payload, "fence"), false);
+});
+
+test("v4 revision 2 rejects an invented renewal fence even after all hashes are rebound", () => {
+  const draft = loadDraft();
+  draft.inventory.operations.find(
+    (row) => row.id === "sdk-renew",
+  ).result_shape = "{ok:true,resource,fence,expires_at}";
+  rebind(draft);
+  assert.ok(validate(draft).includes("renewal serialized shape"));
+});
+
+test("v4 revision 2 rejects each local recipe relabelled as a service verb even when rehashed", () => {
+  for (const id of loadDraft().inventory.worker_local_recipes.ids) {
+    const draft = loadDraft();
+    const row = draft.inventory.operations.find((row) => row.id === id);
+    row.replacement_recipe = `client ${id} ${row.arguments}`;
+    rebind(draft);
+    assert.ok(validate(draft).includes(`${id} local recipe`), id);
+  }
+});
+
+test("revision 2 preserves revision 1 rubric and comparator semantics with only versioned links", () => {
+  const current = loadDraft();
+  const retained = loadDraft(1);
+  for (const key of ["rubric", "comparator"]) {
+    const normalized = JSON.parse(
+      JSON.stringify(current[key])
+        .replaceAll("v4-draft-v2", "v4-draft-v1")
+        .replaceAll("/4-draft-2", "/4-draft-1"),
+    );
+    if (key === "rubric") normalized.draft_revision = 1;
+    assert.deepEqual(normalized, retained[key], key);
   }
 });
