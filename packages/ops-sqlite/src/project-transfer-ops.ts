@@ -83,6 +83,13 @@ export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
  */
 const RECORDS_DIGEST_ORDER_MIGRATION = 41;
 
+/**
+ * Migration 43 added `record_revisions.principal_id`. Archives taken below this
+ * level never carried it, and restoring one leaves it NULL, so those levels
+ * digest the rows without the column.
+ */
+const REVISION_PRINCIPAL_MIGRATION = 43;
+
 /** `PROJECT_BACKUP_TABLES` with `records` back after `artifact_reviews`. */
 const LEGACY_DIGEST_TABLES: readonly ProjectBackupTable[] = (() => {
   const tables: ProjectBackupTable[] = PROJECT_BACKUP_TABLES.filter(
@@ -299,6 +306,13 @@ export async function semanticDigest(
             profile_selection: _selection,
             ...legacyRow
           } = row;
+          row = legacyRow;
+        }
+        if (
+          migrationVersion < REVISION_PRINCIPAL_MIGRATION &&
+          table === "record_revisions"
+        ) {
+          const { principal_id: _principal, ...legacyRow } = row;
           row = legacyRow;
         }
         if (migrationVersion < 39 && table === "work_attempts") {

@@ -361,6 +361,7 @@ function insertRevisionRow(
       created_at: args.created_at,
       message: args.message ?? null,
       token_id: args.origin.tokenId ?? null,
+      principal_id: args.origin.principalId,
       source: args.origin.source ?? null,
       source_version: args.origin.sourceVersion ?? null,
     })
@@ -1082,6 +1083,7 @@ export async function patchRecord(
           created_at: now,
           message: input.message ?? null,
           token_id: origin.tokenId ?? null,
+          principal_id: origin.principalId,
           source: origin.source ?? null,
           source_version: origin.sourceVersion ?? null,
         })
@@ -1231,6 +1233,7 @@ export function archiveRecord(
           created_at: now,
           message: input.message ?? null,
           token_id: origin.tokenId ?? null,
+          principal_id: origin.principalId,
           source: origin.source ?? null,
           source_version: origin.sourceVersion ?? null,
         })
@@ -1373,6 +1376,7 @@ export function unarchiveRecord(
           created_at: now,
           message: input.message ?? null,
           token_id: origin.tokenId ?? null,
+          principal_id: origin.principalId,
           source: origin.source ?? null,
           source_version: origin.sourceVersion ?? null,
         })
@@ -1704,6 +1708,11 @@ export function listRecordHistory(
       canonical_artifact_key: r.canonical_artifact_key,
       source_artifact_key: r.source_artifact_key,
       actor: r.actor,
+      // Authorship beyond the display `actor`. NULL for revisions written
+      // before migration 43 (principal_id) or by a non-credential origin
+      // (token_id); never inferred.
+      principal_id: r.principal_id,
+      token_id: r.token_id,
       created_at: r.created_at,
       message: r.message,
     };
