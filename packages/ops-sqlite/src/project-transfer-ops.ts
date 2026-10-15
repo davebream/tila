@@ -76,6 +76,22 @@ export const PROJECT_BACKUP_TABLES = [
 
 export type ProjectBackupTable = (typeof PROJECT_BACKUP_TABLES)[number];
 
+/**
+ * Migration 41 shipped with the move of `records` ahead of the artifact tables.
+ * A manifest records its migration level but not the order its digest was
+ * taken in, so levels below this one digest in the historical order.
+ */
+const RECORDS_DIGEST_ORDER_MIGRATION = 41;
+
+/** `PROJECT_BACKUP_TABLES` with `records` back after `artifact_reviews`. */
+const LEGACY_DIGEST_TABLES: readonly ProjectBackupTable[] = (() => {
+  const tables: ProjectBackupTable[] = PROJECT_BACKUP_TABLES.filter(
+    (table) => table !== "records",
+  );
+  tables.splice(tables.indexOf("artifact_reviews") + 1, 0, "records");
+  return tables;
+})();
+
 const PRIMARY_KEYS: Record<ProjectBackupTable, readonly string[]> = {
   attempt_corrections: ["id"],
   work_questions: ["id"],
@@ -216,7 +232,13 @@ export async function semanticDigest(
   migrationVersion = LATEST_PROJECT_MIGRATION,
 ): Promise<string> {
   const sections: string[] = [];
-  for (const table of PROJECT_BACKUP_TABLES) {
+  // Export, insert and clear keep PROJECT_BACKUP_TABLES; only the digest
+  // follows the level the archive was taken at.
+  const digestTables =
+    migrationVersion < RECORDS_DIGEST_ORDER_MIGRATION
+      ? LEGACY_DIGEST_TABLES
+      : PROJECT_BACKUP_TABLES;
+  for (const table of digestTables) {
     if (migrationVersion < 40 && table === "attempt_corrections") continue;
     if (
       migrationVersion < 36 &&
