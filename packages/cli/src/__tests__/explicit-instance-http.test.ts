@@ -37,6 +37,9 @@ const home = join(root, "home");
 const projectA = join(root, "project-a");
 const projectLocal = join(root, "project-local");
 const projectDestroy = join(root, "project-destroy");
+const projectDisconnect = join(root, "project-disconnect");
+const projectDisconnectInvalid = join(root, "project-disconnect-invalid");
+const credentialFiles = [".env", ".session", "github-token-cache.json"];
 const localDb = join(projectLocal, "state.db");
 const entry = resolve(import.meta.dirname, "../index.ts");
 
@@ -141,6 +144,16 @@ beforeAll(async () => {
   writeFileSync(
     join(projectDestroy, ".tila/.env"),
     "TILA_API_TOKEN=destroy-token\n",
+  );
+  mkdirSync(join(projectDisconnect, ".tila"), { recursive: true });
+  writeFileSync(
+    join(projectDisconnect, ".tila/config.toml"),
+    config(a.url, "proj-disconnect"),
+  );
+  mkdirSync(join(projectDisconnectInvalid, ".tila"), { recursive: true });
+  writeFileSync(
+    join(projectDisconnectInvalid, ".tila/config.toml"),
+    "this is = [not valid toml\n",
   );
   // Infra-owner destroy by slug acts on the Worker saved here: instance A's.
   writeFileSync(
@@ -370,6 +383,79 @@ describe("project destroy with an explicit --instance", () => {
     expect(output).not.toContain("different deployment");
     expect(a.requests).toEqual([]);
     expect(b.requests).toEqual([]);
+  });
+});
+
+describe("disconnect with an explicit --instance", () => {
+  const seed = (dir: string) => {
+    for (const file of credentialFiles)
+      writeFileSync(join(dir, ".tila", file), "synthetic-credential\n");
+  };
+  const remaining = (dir: string) =>
+    credentialFiles.filter((file) => existsSync(join(dir, ".tila", file)));
+
+  beforeEach(() => {
+    seed(projectDisconnect);
+    seed(projectDisconnectInvalid);
+  });
+
+  it("cwd bound to A, --instance B deletes none of A's credential files", async () => {
+    const result = await invoke(
+      ["--instance", "b-key", "disconnect", "--json"],
+      {
+        cwd: projectDisconnect,
+      },
+    );
+    expectRefusedBeforeAnyRequest(result, /different deployment/);
+    expect(remaining(projectDisconnect)).toEqual(credentialFiles);
+    expect(existsSync(join(projectDisconnect, ".tila/config.toml"))).toBe(true);
+  });
+
+  it("keeps the files when the instance is unregistered", async () => {
+    const result = await invoke(
+      ["--instance", "ghost", "disconnect", "--json"],
+      {
+        cwd: projectDisconnect,
+      },
+    );
+    expectRefusedBeforeAnyRequest(result, /unknown instance/i);
+    expect(remaining(projectDisconnect)).toEqual(credentialFiles);
+  });
+
+  it("keeps the files when --project is not the directory's project", async () => {
+    const result = await invoke(
+      ["--instance", "a-key", "--project", "proj-b", "disconnect", "--json"],
+      { cwd: projectDisconnect },
+    );
+    expectRefusedBeforeAnyRequest(result, /--project "proj-b"/);
+    expect(remaining(projectDisconnect)).toEqual(credentialFiles);
+  });
+
+  it("fails closed, keeping the files, when the config cannot be verified", async () => {
+    const result = await invoke(["--instance", "a-key", "disconnect"], {
+      cwd: projectDisconnectInvalid,
+    });
+    expect(result.status).not.toBe(0);
+    expect(remaining(projectDisconnectInvalid)).toEqual(credentialFiles);
+  });
+
+  it("matching instance still removes the project's credential files (control)", async () => {
+    const result = await invoke(["--instance", "a-key", "disconnect"], {
+      cwd: projectDisconnect,
+    });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(remaining(projectDisconnect)).toEqual([]);
+    expect(existsSync(join(projectDisconnect, ".tila/config.toml"))).toBe(true);
+    expect(a.requests).toEqual([]);
+    expect(b.requests).toEqual([]);
+  });
+
+  it("without --instance still removes the files, even if config.toml is unparseable", async () => {
+    for (const dir of [projectDisconnect, projectDisconnectInvalid]) {
+      const result = await invoke(["disconnect"], { cwd: dir });
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      expect(remaining(dir)).toEqual([]);
+    }
   });
 });
 
