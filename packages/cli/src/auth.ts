@@ -8,12 +8,22 @@ import { getGlobalFlags } from "./lib/global-flags";
 const TOKEN_ENV_VAR = "TILA_API_TOKEN";
 const ENV_FILENAME = ".env";
 
+function resolveEnvToken(): string | null {
+  for (const name of ["TILA_TOKEN", TOKEN_ENV_VAR]) {
+    const token = process.env[name]?.trim();
+    if (token) return token;
+  }
+  return null;
+}
+
 /**
  * Resolve the API token. Priority depends on auth mode:
  *
  * Mode "tila-token" (default):
- *   1. TILA_API_TOKEN environment variable
- *   2. .tila/.env file
+ *   1. Explicit --token (also overrides github-repo mode)
+ *   2. TILA_TOKEN environment variable
+ *   3. TILA_API_TOKEN legacy environment alias
+ *   4. .tila/.env file (TILA_API_TOKEN key)
  *
  * Mode "github-repo":
  *   Returns null (async resolution is needed — use requireTokenAsync)
@@ -32,13 +42,10 @@ export function resolveToken(): string | null {
   }
 
   // Default: tila-token mode
-  // 1. Environment variable takes priority
-  const envToken = process.env[TOKEN_ENV_VAR];
-  if (envToken && envToken.trim().length > 0) {
-    return envToken.trim();
-  }
+  const envToken = resolveEnvToken();
+  if (envToken) return envToken;
 
-  // 2. Fall back to .tila/.env file
+  // Fall back to the legacy .tila/.env file key.
   const tilaDir = findTilaDir();
   if (!tilaDir) {
     return null;
@@ -123,7 +130,7 @@ export function requireToken(): string {
   const token = resolveToken();
   if (!token) {
     throw new Error(
-      `No API token found.\n\nSet the ${TOKEN_ENV_VAR} environment variable, or add it to .tila/.env:\n  ${TOKEN_ENV_VAR}=your-token-here\n\nRun 'tila project create' to provision a new project, or 'tila init' to join an existing one.`,
+      `No API token found.\n\nSet TILA_TOKEN (or the legacy ${TOKEN_ENV_VAR} environment alias), or add a token to .tila/.env:\n  ${TOKEN_ENV_VAR}=your-token-here\n\nRun 'tila project create' to provision a new project, or 'tila init' to join an existing one.`,
     );
   }
   return token;
@@ -131,7 +138,8 @@ export function requireToken(): string {
 
 /**
  * Resolve the API token or throw with actionable error (async).
- * Supports both sync (tila-token) and async (github-repo) modes.
+ * After the managed-runtime guard, --token and then the trimmed TILA_TOKEN /
+ * TILA_API_TOKEN env fallback precede human sessions and either auth mode.
  */
 export async function requireTokenAsync(): Promise<string> {
   if (
@@ -151,8 +159,8 @@ export async function requireTokenAsync(): Promise<string> {
   const config = findConfig();
   const tilaDir = findTilaDir();
 
-  if (process.env.TILA_API_TOKEN?.trim())
-    return process.env.TILA_API_TOKEN.trim();
+  const envToken = resolveEnvToken();
+  if (envToken) return envToken;
   if (config?.worker_url && !process.env.CI && process.stdin.isTTY) {
     const { humanSessionStore } = await import("./lib/human-login");
     const session = await humanSessionStore().get(config.worker_url);
@@ -192,7 +200,7 @@ export async function requireTokenAsync(): Promise<string> {
   const token = resolveToken();
   if (!token) {
     throw new Error(
-      `No API token found.\n\nSet the ${TOKEN_ENV_VAR} environment variable, or add it to .tila/.env:\n  ${TOKEN_ENV_VAR}=your-token-here\n\nRun 'tila project create' to provision a new project, or 'tila init' to join an existing one.`,
+      `No API token found.\n\nSet TILA_TOKEN (or the legacy ${TOKEN_ENV_VAR} environment alias), or add a token to .tila/.env:\n  ${TOKEN_ENV_VAR}=your-token-here\n\nRun 'tila project create' to provision a new project, or 'tila init' to join an existing one.`,
     );
   }
   return token;

@@ -562,9 +562,26 @@ tila token issue --name ci  # Issue a new token
 tila token revoke --name ci # Revoke a token
 ```
 
-**Token resolution order:**
-1. `TILA_API_TOKEN` environment variable
-2. `.tila/.env` file
+**Project-token resolution order (`tila-token` mode):**
+
+1. Explicit `--token`
+2. `TILA_TOKEN` environment variable
+3. `TILA_API_TOKEN` legacy environment alias
+4. `.tila/.env` file, using the existing `TILA_API_TOKEN` key
+
+Environment values are trimmed independently; absent, empty or whitespace-only
+values fall through to the next source. With a project's `.tila/config.toml`
+already configured, `TILA_TOKEN` lets ordinary project commands authenticate
+without storing a keychain credential. `tila link` still requires keychain
+persistence. A nonempty token rejected by the server does not trigger a retry
+with another credential.
+
+Async project startup checks the managed-runtime guard first, then the flag and
+environment credentials. Without those overrides, an interactive human session
+can precede the file or GitHub exchange when `worker_url` is set, CI is unset and
+stdin is a TTY. Async GitHub mode accepts the same flag/env overrides; synchronous
+GitHub resolution retains its cached-session behavior and otherwise requires
+async resolution. The legacy file is not a GitHub-mode override.
 
 ### Migrating from D1 Tokens
 
