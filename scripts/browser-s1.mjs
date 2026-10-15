@@ -33,6 +33,7 @@ import {
 } from "@tila/core";
 import { readDefinitionFile } from "@tila/core/definition-yaml";
 import { chromium } from "playwright";
+import { runClaimsOutage } from "./browser-s1-outage.mjs";
 import { runS1Scale } from "./browser-s1-scale.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -55,9 +56,11 @@ let step = "prepare fixture";
 let browser;
 let browserServer;
 let scenario;
+let claimsStage;
 let page;
 let finished = false;
 let releaseHeld;
+const scenarioController = new AbortController();
 const children = [];
 const ports = [];
 const secrets = [];
@@ -102,6 +105,28 @@ async function bounded(promise, ms, label) {
   } finally {
     clearTimeout(timer);
   }
+}
+async function stopClaimsBrowserWork() {
+  // chromium.connect() makes close() dispose the local connection, rejecting
+  // every outstanding channel call, including untimed evaluate/count/body reads.
+  // Kill the owned process group as well so server-side work cannot remain live.
+  const disconnected = browser.close({ reason: "Claims stage cancelled" });
+  const child = browserServer.process();
+  const exited = new Promise((done) => {
+    if (child.exitCode !== null || child.signalCode !== null) done();
+    else child.once("exit", done);
+  });
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+  await bounded(
+    Promise.all([disconnected, exited]),
+    3000,
+    "stop claims browser work",
+  );
+  if (browser.isConnected()) throw new Error("Claims browser still connected");
 }
 function groupAlive(pid) {
   try {
@@ -236,6 +261,7 @@ try {
   for (const path of [
     "scripts/browser-s1.mjs",
     "scripts/browser-s1-scale.mjs",
+    "scripts/browser-s1-outage.mjs",
     "packages/integration-tests/fixtures/s1-scale.ts",
     "packages/integration-tests/runtime/task-scale-pages.test.ts",
   ]) {
@@ -459,7 +485,7 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       .update(await readFile(migrationFile))
       .digest("hex"),
   });
-  async function request(path, body) {
+  async function request(path, body, signal = AbortSignal.timeout(10_000)) {
     const response = await fetch(`${api}${path}`, {
       method: body ? "POST" : "GET",
       redirect: "error",
@@ -469,7 +495,7 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
         "X-Tila-Participant-Id": "browser-competitor",
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(10_000),
+      signal,
     });
     const contentType = (response.headers.get("Content-Type") || "<missing>")
       .split(";")[0]
@@ -600,8 +626,8 @@ INSERT INTO _tokens (token_hash, project_id, name, scopes, created_at, created_b
       schemaPosts++;
   });
   const caseTimer = setTimeout(
-    () => failRun(new Error("Browser case exceeded 300 seconds")),
-    300_000,
+    () => failRun(new Error("Browser case exceeded 390 seconds")),
+    390_000,
   );
   const at = async (suffix = "") => {
     await page.waitForURL(`${base}${suffix}`);
@@ -1372,6 +1398,26 @@ retention_days = 30
         record,
         evidence,
       });
+      step = "task drawer claims fault and recovery";
+      claimsStage = runClaimsOutage({
+        page,
+        request,
+        api,
+        ui,
+        project,
+        bounded,
+        record,
+        evidence,
+        signal: scenarioController.signal,
+        stopBrowserWork: stopClaimsBrowserWork,
+        openPage: async () => {
+          page = await context.newPage();
+          page.setDefaultTimeout(15_000);
+          page.on("pageerror", (error) => errors.push(redact(error.message)));
+          return page;
+        },
+      });
+      await bounded(claimsStage, 90_000, "claims stage");
       assert.deepEqual(external, [], "browser attempted external access");
       assert.deepEqual(errors, [], "browser page errors");
     })();
@@ -1392,7 +1438,19 @@ retention_days = 30
   process.exitCode = 1;
 } finally {
   finished = true;
+  scenarioController.abort();
   releaseHeld?.();
+  if (claimsStage) {
+    try {
+      await bounded(
+        claimsStage.catch(() => {}),
+        35_000,
+        "claims cancellation and cleanup",
+      );
+    } catch {
+      cleanup.errors.push("claims stage did not stop before shared teardown");
+    }
+  }
   try {
     await bounded(browser?.close() ?? Promise.resolve(), 5000, "browser close");
   } catch {
@@ -1493,7 +1551,7 @@ retention_days = 30
     JSON.stringify(
       {
         scope:
-          "partial local browser S1: definitions, revision conflicts, changed stale partial import and 301 task pages/search; no live/native/S2/S3 acceptance",
+          "partial local browser S1: definitions, revision conflicts, changed stale partial import, 301 task pages/search and injected claims recovery; no live/native/S2/S3 acceptance",
         observations,
         external,
         blocked_optional_fonts: blockedOptionalFonts,
