@@ -36,3 +36,13 @@ fields. The concrete offline implementation lives in `@tila/backend-embedded`
 (`EmbeddedProject` implements `RecordBackend`), which `cli/src/local` (Bun) and
 `tila-sdk/local` (Node) both delegate to — so records work in local mode across the
 CLI, SDK, and MCP server.
+
+`createRecord`, `setRecord` and `putRecord` resolve to `RecordWriteResult`
+(`RecordRow | RecordWriteReceiptResponse`, from `@tila/schemas`). A remote
+credential that may write but not read a key gets the receipt (`receipt: true`,
+`type`, `key`, `fence`): no revision, value or timestamps, and none is invented
+or read back. Narrow with `isRecordWriteReceipt` before reading `revision` or
+`value`. `EmbeddedProject` and readable remote writes still return the full
+`RecordRow`, so only code typed against `RecordBackend` has a new branch to
+handle. `patchRecord`, `archiveRecord` and `unarchiveRecord` need read access and
+stay `RecordRow`.

@@ -1250,6 +1250,13 @@ response, so clients can tell the two apart (`isRecordWriteReceipt` in the SDK,
 return the stored record, so they need read access to the same key and never
 return a receipt. Responses for every other credential are unchanged.
 
+The remote `RecordBackend` (`RemoteRecordBackend` in `tila-sdk`) passes the
+receipt through: `createRecord`, `setRecord` and `putRecord` resolve to a
+`RecordWriteResult`, either the flat record row or the receipt, and nothing is
+read back or reconstructed from the request. Narrow with `isRecordWriteReceipt`
+before reading `revision` or `value`. The local backend and a credential that
+can read what it writes keep returning the full row.
+
 ### Patch Request
 
 ```http
@@ -1471,6 +1478,26 @@ only for full `set` file inputs:
 ```
 
 For non-snapshot record types, skip the source upload.
+
+Output depends on what the credential may read. One that can read the record
+prints the stored revision and fence:
+
+```text
+Set record service/api (rev 5, fence 9)
+```
+
+One that may write but not read the key gets a [write receipt](#write-receipt).
+The command prints the fence and no revision, because none was returned, and it
+does not read the record back:
+
+```text
+Set record service/api (fence 9; write receipt, revision not returned)
+```
+
+`--json` prints the stored row in the first case and
+`{ "receipt": true, "type": "service", "key": "api", "fence": 9 }` in the
+second; `receipt` tells them apart. A rejected write (stale fence, denied or
+undeclared type) is an error in both cases and prints no success line.
 
 ### `patch`
 
