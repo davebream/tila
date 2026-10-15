@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   SchemaParseException,
@@ -83,9 +84,22 @@ fields = [
   { name = "title",       required = true,  type = "string" },
   { name = "description", required = false, type = "text" },
   { name = "status",      required = true,  type = "enum",
-    values = ["open", "in_progress", "blocked", "done", "cancelled"] },
+    values = ["open", "in_progress", "blocked", "done", "failed", "cancelled", "deferred"] },
 ]
 parents = []
+
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "failed", "cancelled", "deferred"]
+dependency_satisfied = ["done"]
+on_start = "in_progress"
+
+[work_units.task.lifecycle.outcomes]
+success = "done"
+failure = "failed"
+cancelled = "cancelled"
+abandoned = "deferred"
 
 [artifacts.lesson]
 mime_types = ["text/markdown"]
@@ -402,6 +416,44 @@ parents = ["missing"]
       if (!result.ok) return;
 
       expect(result.schema.artifacts?.patch?.searchable).toBe(false);
+    });
+
+    it("maps every canonical outcome to a declared terminal state", () => {
+      const result = parseSchemaToml(BUNDLED_DEFAULT_SCHEMA_TOML);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const task = result.schema.work_units.task;
+      const lifecycle = task.lifecycle;
+      expect(lifecycle?.field).toBe("status");
+      expect(lifecycle?.outcomes).toEqual({
+        success: "done",
+        failure: "failed",
+        cancelled: "cancelled",
+        abandoned: "deferred",
+      });
+      for (const state of Object.values(lifecycle?.outcomes ?? {})) {
+        expect(lifecycle?.terminal).toContain(state);
+        expect(task.fields.status.values).toContain(state);
+      }
+      // `close` stores a state, never an `outcome` field.
+      expect(task.fields.outcome).toBeUndefined();
+    });
+
+    it("declares the same task as the repository's bundled tila.schema.toml", () => {
+      const fixture = parseSchemaToml(BUNDLED_DEFAULT_SCHEMA_TOML);
+      const bundled = parseSchemaToml(
+        readFileSync(
+          new URL("../../../tila.schema.toml", import.meta.url),
+          "utf8",
+        ),
+      );
+      expect(fixture.ok && bundled.ok).toBe(true);
+      if (!fixture.ok || !bundled.ok) return;
+
+      expect(fixture.schema.work_units.task).toEqual(
+        bundled.schema.work_units.task,
+      );
     });
   });
 

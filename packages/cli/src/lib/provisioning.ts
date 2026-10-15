@@ -422,9 +422,24 @@ fields = [
   { name = "title",       required = true,  type = "string" },
   { name = "description", required = false, type = "text" },
   { name = "status",      required = true,  type = "enum",
-    values = ["open", "in_progress", "blocked", "done", "cancelled"] },
+    values = ["open", "in_progress", "blocked", "done", "failed", "cancelled", "deferred"] },
 ]
 parents = []
+
+# \`tila task close --outcome <outcome>\` moves a task to the state its outcome
+# maps to below; only the \`status\` field is written.
+[work_units.task.lifecycle]
+field = "status"
+dispatchable = ["open"]
+terminal = ["done", "failed", "cancelled", "deferred"]
+dependency_satisfied = ["done"]
+on_start = "in_progress"
+
+[work_units.task.lifecycle.outcomes]
+success = "done"
+failure = "failed"
+cancelled = "cancelled"
+abandoned = "deferred"
 
 # ---------------------------------------------------------------------------
 # ARTIFACTS — content-addressed blobs produced or uploaded into the project
