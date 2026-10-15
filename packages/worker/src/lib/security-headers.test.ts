@@ -37,15 +37,37 @@ describe("addSecurityHeaders", () => {
     );
   });
 
-  it("includes style-src with Google Fonts allowlist", () => {
+  it("allows styles and fonts from the same origin only", () => {
+    const headers = new Headers();
+    addSecurityHeaders(headers);
+
+    // Compare whole directives: a prefix match would still pass if an origin
+    // were appended to style-src or font-src.
+    const csp = headers.get("Content-Security-Policy") ?? "";
+    const directives = csp.split("; ");
+    expect(directives).toContain("style-src 'self' 'unsafe-inline'");
+    expect(directives).toContain("font-src 'self'");
+    expect(csp).not.toContain("fonts.googleapis.com");
+    expect(csp).not.toContain("fonts.gstatic.com");
+  });
+
+  it("emits exactly the expected directives", () => {
     const headers = new Headers();
     addSecurityHeaders(headers);
 
     const csp = headers.get("Content-Security-Policy") ?? "";
-    expect(csp).toContain(
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    );
-    expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
+    expect(csp.split("; ")).toEqual([
+      "default-src 'self'",
+      "script-src 'self'",
+      "connect-src 'self' https://api.github.com",
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "upgrade-insecure-requests",
+    ]);
   });
 
   it("allows browser calls to the GitHub public API for user lookup", () => {
