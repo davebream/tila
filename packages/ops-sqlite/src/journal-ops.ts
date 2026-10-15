@@ -74,55 +74,21 @@ export function appendJournal(
     .run();
 }
 
-/**
- * List journal entries with optional filters.
- *
- * Ordering depends on whether a cursor is supplied:
- * - Without `after_seq`, the newest `limit` entries are returned, newest first.
- * - With `after_seq`, the next `limit` entries strictly after the cursor are
- *   returned, oldest first, so a client advances the cursor to the last `seq`
- *   it received and never skips an entry however large the burst. A page
- *   shorter than `limit` means the client has caught up.
- *
- * When `watermark` is provided and `query.after_seq` is less than
- * `watermark.lastArchivedSeq`, the requested range has been archived to R2
- * and deleted from DO SQLite. Returns an empty array in that case — callers
- * should surface an "archived" indicator to the client.
- */
-export function listJournal(
-  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
-  query: {
-    resource?: string | string[];
-    kind?: string | string[];
-    client_name?: string | string[];
-    event_name?: string;
-    correlation_id?: string;
-    after_seq?: number;
-    limit?: number;
-  },
-  watermark?: { lastArchivedSeq: number },
-): {
-  seq: number;
-  t: number;
-  kind: string;
-  resource: string;
-  principal_id: string;
-  participant_id: string;
-  environment: EnvironmentMetadata;
-  token_id: string | null;
-  fence: number | null;
-  data: Record<string, unknown>;
-}[] {
-  // When the requested range falls entirely within the archived region,
-  // return an empty array — the caller surfaces an "archived" indicator.
-  if (
-    watermark !== undefined &&
-    query.after_seq !== undefined &&
-    query.after_seq < watermark.lastArchivedSeq
-  ) {
-    return [];
-  }
+export interface JournalListQuery {
+  resource?: string | string[];
+  kind?: string | string[];
+  client_name?: string | string[];
+  event_name?: string;
+  correlation_id?: string;
+  after_seq?: number;
+  limit?: number;
+}
 
+/**
+ * The WHERE conditions a journal list applies, in one place so the scoped
+ * (namespace-restricted) list filters rows exactly as the unrestricted one does.
+ */
+export function journalFilterConditions(query: JournalListQuery): SQL[] {
   const conditions: SQL[] = [];
   if (query.event_name || query.correlation_id) {
     conditions.push(eq(schema.journal.kind, "custom.reported"));
@@ -159,6 +125,51 @@ export function listJournal(
   if (query.after_seq !== undefined) {
     conditions.push(gt(schema.journal.seq, query.after_seq));
   }
+  return conditions;
+}
+
+/**
+ * List journal entries with optional filters.
+ *
+ * Ordering depends on whether a cursor is supplied:
+ * - Without `after_seq`, the newest `limit` entries are returned, newest first.
+ * - With `after_seq`, the next `limit` entries strictly after the cursor are
+ *   returned, oldest first, so a client advances the cursor to the last `seq`
+ *   it received and never skips an entry however large the burst. A page
+ *   shorter than `limit` means the client has caught up.
+ *
+ * When `watermark` is provided and `query.after_seq` is less than
+ * `watermark.lastArchivedSeq`, the requested range has been archived to R2
+ * and deleted from DO SQLite. Returns an empty array in that case — callers
+ * should surface an "archived" indicator to the client.
+ */
+export function listJournal(
+  db: BaseSQLiteDatabase<"sync", unknown, typeof schema>,
+  query: JournalListQuery,
+  watermark?: { lastArchivedSeq: number },
+): {
+  seq: number;
+  t: number;
+  kind: string;
+  resource: string;
+  principal_id: string;
+  participant_id: string;
+  environment: EnvironmentMetadata;
+  token_id: string | null;
+  fence: number | null;
+  data: Record<string, unknown>;
+}[] {
+  // When the requested range falls entirely within the archived region,
+  // return an empty array — the caller surfaces an "archived" indicator.
+  if (
+    watermark !== undefined &&
+    query.after_seq !== undefined &&
+    query.after_seq < watermark.lastArchivedSeq
+  ) {
+    return [];
+  }
+
+  const conditions = journalFilterConditions(query);
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -176,7 +187,27 @@ export function listJournal(
     .limit(query.limit ?? 100)
     .all();
 
-  return rows.map((row) => ({
+  return rows.map(journalRowToEvent);
+}
+
+export type JournalListEvent = {
+  seq: number;
+  t: number;
+  kind: string;
+  resource: string;
+  principal_id: string;
+  participant_id: string;
+  environment: EnvironmentMetadata;
+  token_id: string | null;
+  fence: number | null;
+  data: Record<string, unknown>;
+};
+
+/** The public event shape of a live journal row. */
+export function journalRowToEvent(
+  row: typeof schema.journal.$inferSelect,
+): JournalListEvent {
+  return {
     seq: row.seq ?? 0,
     t: row.t,
     kind: row.kind,
@@ -187,7 +218,7 @@ export function listJournal(
     token_id: row.token_id ?? null,
     fence: row.fence,
     data: JSON.parse(row.data) as Record<string, unknown>,
-  }));
+  };
 }
 
 /**

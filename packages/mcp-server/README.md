@@ -131,13 +131,26 @@ Artifact results expose provenance and review state; a matching hash does not es
 | Tool | Description |
 |------|-------------|
 | `tila_record_get` | Get a record by type and key |
-| `tila_record_set` | Set (full replace) a record's value (requires fence) |
-| `tila_record_put` | Put (upsert) a record's value (requires fence) |
+| `tila_record_set` | Set (full replace) a record's value (requires fence; a write-only credential gets a receipt) |
+| `tila_record_put` | Put (upsert) a record's value without a fence (a write-only credential gets a receipt) |
 | `tila_record_patch` | Apply JSON Merge Patch to a record (requires fence) |
 | `tila_record_list` | List records of a given type (metadata only) |
 | `tila_record_history` | Get revision history for a record |
 | `tila_record_archive` | Archive a record (requires fence) |
 | `tila_record_unarchive` | Unarchive a record (requires fence) |
+
+A credential can be limited to record types and key prefixes, either with one
+`records` rule list that applies to reading and writing alike, or with separate
+`records_read` and `records_write` lists. Once either split list is present, a
+side that is left out denies every record, as does an empty list. Reading
+(`tila_record_get`, `tila_record_list`, `tila_record_history`) uses the read
+side; writing uses the write side. Patch, archive and unarchive return the
+stored record, so they also need read access to the key.
+
+`tila_record_set` and `tila_record_put` answer a credential that may write a
+key but not read it with a receipt (`ok`, `receipt: true`, `type`, `key`,
+`fence`) instead of the record. The fence is what a later `tila_record_set`
+needs, because that credential cannot call `tila_record_get`.
 
 ### Artifacts
 

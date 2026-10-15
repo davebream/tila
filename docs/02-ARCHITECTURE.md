@@ -749,7 +749,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/whoami` | — | `{ token_name, scopes }` |
 | GET | `/schema` | — | `{ version, schema_toml }` |
 | POST | `/schema/apply` | `{ schema_toml, strategy?, dry_run? }` | `{ ok, new_version, changes, warnings }` |
-| GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
+| GET | `/tasks` (alias `/entities`) | query: `type`, `status`, `state`, `parent`, `archived`, `sort` (`created_at`, `updated_at`, `type`, `title`, `status`, `state`, `id`), `order`, `limit`, `cursor` or `offset` | `{ entities: [], total, limit, offset, has_more, next_cursor, scope }` — keyset pages (§14.8) |
 | GET | `/search` | query: `q`, `kind`, `type`, `syntax`, `limit`, `cursor`, `tag_filter` | `{ results: [], total, next_cursor, scope }` — `total` counts this page (§14.8) |
 | GET | `/tasks/~/types` | — | `{ ok, types: [{ type, declaration, count, archived_count, definition? }], scope, incomplete? }` — the work type catalog (§14.7) |
 | POST | `/entities` | `{ type, data, parent?, idempotency_key }` | `{ entity }` — `data` is limited to 256 KiB (§14.10) |
@@ -773,7 +773,7 @@ permission matrix. Key-only onboarding/auth retirement is not implied here.
 | GET | `/artifacts/:key` | — | binary body with metadata headers |
 | GET | `/artifacts` | query: `resource`, `kind`, `limit`, `cursor` | `{ artifacts: [], cursor? }` |
 | DELETE | `/artifacts/:key` | `{ force? }` | `{ ok }` |
-| GET | `/journal` | query: `after_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `event_name`, `correlation_id`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — without `after_seq` the newest `limit` events, newest first; with `after_seq` the next `limit` events after it, oldest first, so a client pages forward by passing the last `seq` as `after_seq` until a page is shorter than `limit`. `archived: true` (cursor below `lastArchivedSeq`) returns no events: read archived history with `/journal/replay` |
+| GET | `/journal` | query: `after_seq`, `resource` (repeatable, up to 10), `kind`, `client_name`, `event_name`, `correlation_id`, `limit` | `{ ok, events: [{ principal_id, participant_id, environment, token_id, ... }], archived, lastArchivedSeq }` — without `after_seq` the newest `limit` events, newest first; with `after_seq` the next `limit` events after it, oldest first, so a client pages forward by passing the last `seq` as `after_seq` until a page is shorter than `limit`. `archived: true` (cursor below `lastArchivedSeq`) returns no events: read archived history with `/journal/replay`. A namespace-restricted credential sees only the entity, claim and record events it may read and also receives `has_more` and, with `after_seq`, `next_after_seq`; a short page is "caught up" only when `has_more` is false (see [Scoped journal reads](#scoped-journal-reads-518)) |
 | GET | `/doctor` | — | `{ ok, checks: [{ name, status, detail }] }` |
 | POST | `/reset` | `{ confirm: "PROJECT_ID", keep_artifacts?, keep_entity_types? }` | `{ ok, dropped }` |
 | GET | `/` (and static paths) | — | UI HTML/JS bundle |
@@ -2976,6 +2976,71 @@ SDK (`isRecordWriteReceipt`) and the MCP result schemas, so clients narrow on it
 rather than finding fields missing. The stale-fence message and the
 undeclared-type message are likewise limited for such a caller.
 
+#### Scoped journal reads (#518)
+
+A namespace-restricted credential may read three journal routes: `GET /journal`
+(list), `GET /journal/replay` and `GET /journal/cursor`. Everything else on the
+journal, and handoffs and re-entry, stays denied. Sequence numbers are
+project-wide and visible to every reader by decision; only events the credential
+could read through the resource itself are returned.
+
+**Where it is enforced.** Three layers each deny independently.
+
+| Layer | Rule |
+|---|---|
+| Worker `capabilityMiddleware` | `journal:read` is required, and a restricted credential reaches only `GET`/`HEAD` of exactly `/journal`, `/journal/replay` and `/journal/cursor`. `RESTRICTED_CREDENTIAL_SURFACES` is unchanged, so no other method or path inherits the allowance. |
+| DO `assertCredentialRequest` | `/journal/list`, `/journal/replay` and `/journal/cursor` are allowed only for a read method with `journal:read`. `PUT /journal/cursor`, `/journal/append`, `/handoffs` and `/reentry` fall through to the default denial. |
+| DO route | A restricted policy is answered with the filtered, completed result. The raw replay snapshot never leaves the DO for it. |
+
+**One predicate.** `journalVisibilityOps` (`@tila/ops-sqlite`) holds an allowlist
+of event kinds, and for each the resource shape and payload it may carry. It
+judges a plain event, so live rows and archived rows reach it identically. A
+claim on a task is `<type>:<id>`; the task must exist with that type and satisfy
+the task-list rule (permitted type, and a permitted parent while `task_types`
+is set). A record or a claim on `record:<type>/<key>` is judged by the record
+**read** side only. A `record:<id>` claim that a task of type `record` could also
+be named by is ambiguous and hidden. Task and record lookups bind ids as one JSON
+parameter, so a window of any size stays under the Durable Object's 100-value
+statement limit.
+
+**Replay completes inside the DO.** Unrestricted replay still takes a snapshot
+from the DO and completes it against R2 in the Worker (`completeReplay`).
+Restricted replay is completed in the DO, which holds the policy and an R2
+handle: each window is merged with its archived rows and proven free of missing
+and conflicting sequences (`resolveReplayEvents`) before any row is filtered.
+The Worker passes `project_id` from its own request context; a client-supplied
+`project_id` is ignored.
+
+**Bounded scans.** Work per request is bounded in sequences, never in rows or
+events seen: at most `SCOPED_SCAN_LIMIT` (20,000) sequences per request, in
+windows that double from `SCOPED_SCAN_FIRST_SPAN` (1,000) to
+`SCOPED_SCAN_MAX_SPAN` (8,000), with the last window clamped to the remaining
+budget. A pure core (`startScan`, `nextWindowEnd`, `foldWindow`) decides each
+step and is shared by list and replay; the I/O shells only read a window and
+hand its readable events to it.
+
+| Outcome | `next_after_seq` | `has_more` |
+|---|---|---|
+| A readable event follows a full page | last returned `seq` | `true` |
+| The range up to `through` is exhausted | `through` | `false` |
+| The scan limit ends the request first | last sequence examined | `true` |
+| List cursor inside the archived region | the cursor | `true` (and `archived: true`) |
+
+Because the bound and the cursor are arithmetic on the global sequence, the
+response says nothing about how many hidden events a window held, or of what
+kind: two journals with the same readable events at the same positions answer
+identically however their hidden events differ. Hidden events never contribute
+to a count, and `has_more` is true only when a readable event is known to follow
+or the bound stopped the scan.
+
+A tail list walks down from the newest live sequence under the same bound and
+returns `has_more: true` when fewer than `limit` readable events were found
+before reaching it, so a short tail page is never mistaken for the whole story.
+
+Restricted responses are `Cache-Control: no-store`, and a scoped credential
+bypasses the shared Worker response cache, so one reader's filtered page is
+never served to another.
+
 #### Client, host and deployment boundary — explained exclusions
 
 | Field group / authority | Current surface | Boundary and management path |
@@ -3258,6 +3323,23 @@ many rows share a timestamp. With a `limit`, the response carries an opaque
 - Migration 35 adds `(created_at, id)`, `(updated_at, id)` and `(type, id)`
   indexes. `title` and `status` sorts read `data.title` and `data.status`
   directly (not presentation metadata) and are not indexed.
+- **State filter and sort (#525).** A task's state is the string in its type's
+  declared lifecycle field, or in `status` when the type declares no lifecycle
+  (or is not declared at all). A missing, blank or non-string value is no
+  state. This is the value the dashboard shows in its State column, so
+  `GET /tasks?state=in-review,done` and `sort=state` agree with it for every
+  type, including types whose lifecycle field is not `status`. The `status`
+  filter and `sort=status` are unchanged and still read `data.status` only.
+  `state` is a comma list matched exactly (case and spacing included); a task
+  with no state matches none and sorts first ascending, last descending, with
+  ties broken by `id`. A blank entry is `400 validation-error`. Fields are
+  matched by exact key, as readiness does, and the type-to-field map is bound
+  as one JSON object, so the statement stays under the Durable Object SQLite
+  100-value cap however many types declare a lifecycle. The cursor is bound to
+  the state list, the sort and that map: changing any of them, including a
+  schema change that moves a lifecycle field, returns `400 invalid-cursor`.
+  The sort is not indexed. Search results carry no state, so the dashboard
+  disables its State control in search mode.
 - **Page size.** Without `limit`, every matching task comes back in one response
   (`limit: null`, `next_cursor: null`); send a `limit` to page. A `limit` above
   500 is served as 500 and the response echoes the effective value. The per-page
@@ -3408,13 +3490,13 @@ links to always agree.
 
 `blocked`, `outcome`, `wake` and `expires_after` are bound to list cursors, so a
 cursor issued for one filter is rejected under another. The SDK exposes task
-`blocked?: boolean` and `outcome?: LifecycleOutcome[]` filters over HTTP and local
-Node/Bun backends. `tasks.list` preserves entities plus the exact total, limit,
+`blocked?: boolean`, `outcome?: LifecycleOutcome[]` and `state?: string[]`
+filters, and `sort: "state"`, over HTTP and local Node/Bun backends. `tasks.list` preserves entities plus the exact total, limit,
 offset, has_more, next_cursor and scope (including outcome_types). Existing
 array-returning `EntityBackend.list` remains compatible; optional `listPage`
 supplies metadata without reconstructing totals from a page. CLI `task list`
 accepts `--blocked`, `--outcome` and `--cursor`; MCP `tila_task_list` accepts the
-same filters and paging options. Local SDK lists still return full entities
+same filters, plus `state`, `sort` and `order`, and paging options. Local SDK lists still return full entities
 when compact is requested. Third-party array-only backends report unsupported
 metadata explicitly and cannot silently ignore attention filters or cursors.
 

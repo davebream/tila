@@ -6,7 +6,11 @@ import {
   navVisibility,
   visibleSections,
 } from "@/lib/navigation";
-import { CAPABILITIES, type WhoamiResponse } from "@tila/schemas";
+import {
+  CAPABILITIES,
+  type NamespaceRestrictions,
+  type WhoamiResponse,
+} from "@tila/schemas";
 
 function identity(
   policy: WhoamiResponse["policy"],
@@ -180,6 +184,85 @@ describe("navVisibility", () => {
       "work",
       "settings",
     ]);
+  });
+
+  describe("records follow the read side of the record rules", () => {
+    const withRecords = (restrictions: NamespaceRestrictions | undefined) =>
+      ids(
+        navVisibility(
+          identity({
+            role: "participant",
+            capabilities: [...CAPABILITIES],
+            ...(restrictions ? { restrictions } : {}),
+          }),
+          "test-project",
+        ),
+      );
+
+    test.each<[string, NamespaceRestrictions | undefined, boolean]>([
+      ["unrestricted", undefined, true],
+      ["task limits only", { task_types: ["bug"] }, true],
+      ["a legacy list", { records: [{ type: "config" }] }, true],
+      [
+        "a legacy prefix",
+        { records: [{ type: "config", key_prefixes: ["team"] }] },
+        true,
+      ],
+      ["a legacy deny", { records: [] }, false],
+      [
+        "a legacy rule with no keys",
+        { records: [{ type: "config", key_prefixes: [] }] },
+        false,
+      ],
+      [
+        "a read-only split key",
+        { records_read: [{ type: "answer", key_prefixes: ["a1"] }] },
+        true,
+      ],
+      [
+        "a write-only split key",
+        { records_write: [{ type: "question", key_prefixes: ["q1"] }] },
+        false,
+      ],
+      [
+        "both sides, readable",
+        {
+          records_read: [{ type: "answer" }],
+          records_write: [{ type: "question" }],
+        },
+        true,
+      ],
+      [
+        "an empty read side",
+        { records_read: [], records_write: [{ type: "question" }] },
+        false,
+      ],
+      [
+        "a read side with no keys",
+        { records_read: [{ type: "answer", key_prefixes: [] }] },
+        false,
+      ],
+    ])("%s", (_name, restrictions, shown) => {
+      expect(withRecords(restrictions).includes("records")).toBe(shown);
+    });
+
+    test("a write-only credential keeps the pages its limits do not touch", () => {
+      const visible = withRecords({ records_write: [{ type: "question" }] });
+      expect(visible).toContain("tasks");
+      expect(visible).not.toContain("records");
+    });
+
+    test("a viewer's record read is not hidden by a write rule", () => {
+      const viewer = identity({
+        role: "viewer",
+        capabilities: ["records:read"],
+        restrictions: {
+          records_read: [{ type: "answer" }],
+          records_write: [],
+        },
+      });
+      expect(ids(navVisibility(viewer, "test-project"))).toContain("records");
+    });
   });
 });
 

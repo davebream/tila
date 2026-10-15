@@ -61,6 +61,14 @@ const RESTRICTED_SURFACE = new RegExp(
 );
 
 /**
+ * The only journal routes a namespace-restricted credential may call, and only
+ * for reading: list, replay and the participant cursor. The DO filters each to
+ * the events the credential may read. Appending, acknowledging a cursor,
+ * handoffs and re-entry stay denied; they are not part of the surface list.
+ */
+const RESTRICTED_JOURNAL_READ = /^\/journal(?:\/(?:replay|cursor))?\/?$/;
+
+/**
  * Which side of a record namespace a `/records` request exercises. The table
  * is enumerated rather than inferred from the verb: only GET reads, every
  * mutation is a write, and `PATCH` and `~/archive` / `~/unarchive` also return
@@ -505,7 +513,11 @@ export function capabilityMiddleware(): MiddlewareHandler<AppEnv> {
       }
       // The listed surfaces cannot safely project their cross-resource data.
       // Exact `/search` filters each kind inside the DO (#300).
-      if (!RESTRICTED_SURFACE.test(path) && path !== "/search")
+      if (
+        !RESTRICTED_SURFACE.test(path) &&
+        path !== "/search" &&
+        !(isReadMethod(c.req.method) && RESTRICTED_JOURNAL_READ.test(path))
+      )
         return denied(c);
       if (/^\/tasks\/ready(?:\/|$)/.test(path) || /artifact-refs/.test(path))
         return denied(c);

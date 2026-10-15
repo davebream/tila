@@ -148,6 +148,13 @@ export function assertResourceAccess(
     throw new CredentialPolicyDenied();
 }
 
+/** Journal reads a restricted credential may make; each filters for itself. */
+export const JOURNAL_READ_PATHS: ReadonlySet<string> = new Set([
+  "/journal/list",
+  "/journal/replay",
+  "/journal/cursor",
+]);
+
 /** Record writes whose response is the stored row, not just the caller's input. */
 const ECHOING_OPERATIONS: ReadonlySet<string> = new Set([
   "patch",
@@ -282,6 +289,13 @@ export function assertCredentialRequest(
   }
   if (path === "/entity/type-counts") return; // Counts apply the restriction themselves.
   if (path === "/search") return; // Search applies restrictions and per-kind capabilities itself.
+  if (JOURNAL_READ_PATHS.has(path)) {
+    // The list and replay routes filter events to what the credential may read.
+    // Appending, and acknowledging a cursor, stay denied to restricted callers.
+    if (!isReadMethod(method) || !policy.capabilities.includes("journal:read"))
+      throw new CredentialPolicyDenied();
+    return;
+  }
   if (path === "/entity/list") {
     if (query.get("compact") === "true") throw new CredentialPolicyDenied();
     if (query.has("parent")) assertTaskAccess(db, policy, query.get("parent"));

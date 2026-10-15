@@ -139,7 +139,7 @@ export function matchesReplayFilter(
  * sequence is present exactly once. Callers filter only after this succeeds, so
  * lost history is a 503, never an empty page.
  */
-async function resolveReplayEvents(
+export async function resolveReplayEvents(
   snapshot: ReplaySnapshot,
   archives?: JournalArchiveReader,
 ): Promise<ReplayEvent[]> {

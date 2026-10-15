@@ -24,7 +24,9 @@ import {
   type LifecycleOutcome,
   LifecycleOutcomeSchema,
   type SearchKind,
+  TASK_STATE_FILTER_MESSAGE,
   TaskListPageOptionsSchema,
+  TaskStateListSchema,
   UpdateEntityRequestSchema,
   parseTagFilter,
 } from "@tila/schemas";
@@ -254,6 +256,14 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         );
       outcome = parsed.data;
     }
+    const stateRaw = c.req.query("state");
+    let state: string[] | undefined;
+    if (stateRaw !== undefined) {
+      const parsed = TaskStateListSchema.safeParse(stateRaw.split(","));
+      if (!parsed.success)
+        return jsonError(c, 400, "validation-error", TASK_STATE_FILTER_MESSAGE);
+      state = parsed.data;
+    }
 
     const { entities, total, next_cursor, outcome_types } = entityOps.list(
       db,
@@ -270,6 +280,7 @@ export function createEntityRoutes(deps: RouterDeps): ProjectSubRouter {
         ...(tagFilter?.length ? { tagFilter } : {}),
         ...(blocked ? { blocked } : {}),
         ...(outcome ? { outcome } : {}),
+        ...(state ? { state } : {}),
       },
       deps.enrichOpts(),
     );

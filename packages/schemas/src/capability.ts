@@ -364,6 +364,46 @@ export function permitsRecordWrite(
   return permitsRecordSide(restrictions, "write", type, key);
 }
 /**
+ * Whether some record of `type` is admitted on `side`: the side is
+ * unrestricted, or holds a rule for the type that is not narrowed to zero key
+ * prefixes. This is the type-level question behind "may this credential offer
+ * a create or a listing for this type"; a rule with key prefixes counts, and a
+ * rule with an empty prefix list or a missing side does not. Per-record
+ * decisions still need `permitsRecordSide`.
+ */
+export function permitsRecordTypeSide(
+  restrictions: NamespaceRestrictions | undefined,
+  side: RecordAccessSide,
+  type: string,
+): boolean {
+  const rules = recordRulesForSide(restrictions, side);
+  return (
+    rules === undefined ||
+    rules.some(
+      (rule) =>
+        rule.type === type &&
+        (rule.key_prefixes === undefined || rule.key_prefixes.length > 0),
+    )
+  );
+}
+/**
+ * Whether `side` admits at least one record of some type: it is unrestricted
+ * or holds a rule that is not narrowed to zero key prefixes. A credential for
+ * which this is false has nothing to show or offer on that side.
+ */
+export function permitsAnyRecordSide(
+  restrictions: NamespaceRestrictions | undefined,
+  side: RecordAccessSide,
+): boolean {
+  const rules = recordRulesForSide(restrictions, side);
+  return (
+    rules === undefined ||
+    rules.some(
+      (rule) => rule.key_prefixes === undefined || rule.key_prefixes.length > 0,
+    )
+  );
+}
+/**
  * True only when both sides permit the record. Enforcement must use the
  * side-specific predicates; this stays for display code that needs one answer.
  */

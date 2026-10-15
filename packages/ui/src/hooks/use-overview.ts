@@ -35,6 +35,7 @@ const WORK: AccessTarget = { requires: ["tasks:read"], surface: "tasks" };
 const RECORDS: AccessTarget = {
   requires: ["records:read"],
   surface: "records",
+  records: "read",
 };
 
 const SOURCES: readonly AttentionSource[] = [

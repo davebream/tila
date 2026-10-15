@@ -218,6 +218,7 @@ function createLocalTaskMethods(project: EmbeddedProject) {
         tagFilter: query?.tagFilter,
         blocked: query?.blocked,
         outcome: query?.outcome,
+        state: query?.state,
       });
       return { ok: true, ...page };
     },

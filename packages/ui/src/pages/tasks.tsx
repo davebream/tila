@@ -42,7 +42,12 @@ import { useTableKeyNav } from "@/hooks/use-table-key-nav";
 import { useTimeTick } from "@/hooks/use-time-tick";
 import type { TaskListSort } from "@/lib/api";
 import { taskFiltersFromSearch } from "@/lib/list-queries";
-import { catalogIndex, taskState, taskTitle } from "@/lib/presentation";
+import {
+  catalogIndex,
+  declaredStates,
+  taskState,
+  taskTitle,
+} from "@/lib/presentation";
 import { classifyApiError, deriveSectionState } from "@/lib/query-state";
 import { readinessContext } from "@/lib/readiness-context";
 import { sanitizeSnippet } from "@/lib/snippet";
@@ -59,7 +64,7 @@ import {
 
 const PAGE_SIZE = 100;
 
-type SortKey = "updated" | "type" | "id";
+type SortKey = "updated" | "type" | "state" | "id";
 type Sort = { key: SortKey; dir: "asc" | "desc" };
 
 const DEFAULT_SORT: Sort = { key: "updated", dir: "desc" };
@@ -67,6 +72,7 @@ const DEFAULT_SORT: Sort = { key: "updated", dir: "desc" };
 const SORT_FIELDS: Record<SortKey, TaskListSort> = {
   updated: "updated_at",
   type: "type",
+  state: "state",
   id: "id",
 };
 
@@ -74,7 +80,7 @@ function parseSort(raw: string | null): Sort | null {
   if (!raw) return null;
   const [k, d] = raw.split(":");
   if (
-    (k === "updated" || k === "type" || k === "id") &&
+    (k === "updated" || k === "type" || k === "state" || k === "id") &&
     (d === "asc" || d === "desc")
   ) {
     return { key: k, dir: d };
@@ -157,6 +163,8 @@ export function TasksPage() {
 
   const typeParam = searchParams.get("type");
   const typeFilter = useMemo(() => parseList(typeParam), [typeParam]);
+  const stateParam = searchParams.get("state");
+  const stateFilter = useMemo(() => parseList(stateParam), [stateParam]);
   // Attention filters from Overview links; search cannot apply them.
   const { blocked, outcome } = taskFiltersFromSearch(searchParams);
   const urlQ = (searchParams.get("q") ?? "").trim();
@@ -205,6 +213,7 @@ export function TasksPage() {
         p.set("q", trimmed);
         p.delete("blocked");
         p.delete("outcome");
+        p.delete("state");
       } else p.delete("q");
     });
   }, [debouncedQ]);
@@ -213,6 +222,13 @@ export function TasksPage() {
     updateParams((p) => {
       if (values.length > 0) p.set("type", values.join(","));
       else p.delete("type");
+    });
+  }
+
+  function setStateFilter(values: string[]) {
+    updateParams((p) => {
+      if (values.length > 0) p.set("state", values.join(","));
+      else p.delete("state");
     });
   }
 
@@ -245,6 +261,7 @@ export function TasksPage() {
       p.delete("q");
       p.delete("blocked");
       p.delete("outcome");
+      p.delete("state");
     });
   }
 
@@ -264,6 +281,7 @@ export function TasksPage() {
       archived: includeArchived,
       blocked,
       outcome,
+      state: stateFilter,
       sort: SORT_FIELDS[sort.key],
       order: sort.dir,
       limit: PAGE_SIZE,
@@ -337,6 +355,46 @@ export function TasksPage() {
     return includeArchived ? entry.count + entry.archived_count : entry.count;
   };
 
+  // --- State filter options: the states the catalog's types declare ---
+
+  // Search results carry no state, so the control does not apply to them and
+  // shows no selection there.
+  const selectedStates = searchMode ? [] : stateFilter;
+  const declared = useMemo(
+    () =>
+      catalog
+        ? [...new Set(catalog.types.flatMap((e) => declaredStates(e)))].sort()
+        : [],
+    [catalog],
+  );
+  // Selected states the catalog does not declare (a free-form status, or a
+  // state since renamed). They stay selected and are still sent.
+  const missingStates = useMemo(
+    () =>
+      catalogLoaded ? stateFilter.filter((s) => !declared.includes(s)) : [],
+    [catalogLoaded, stateFilter, declared],
+  );
+  const stateGroups: FilterGroup[] = useMemo(
+    () =>
+      [
+        { label: "Declared", options: declared },
+        { label: "Not declared", options: missingStates },
+      ].filter((g) => g.options.length > 0),
+    [declared, missingStates],
+  );
+  const stateOptions = useMemo(
+    () => [...new Set([...declared, ...stateFilter])],
+    [declared, stateFilter],
+  );
+  const noDeclaredStates =
+    !searchMode && catalogLoaded && stateOptions.length === 0;
+  const stateNoteId = useId();
+  const stateNote = searchMode
+    ? "State filters the task list, not search results."
+    : noDeclaredStates
+      ? "No task type declares states to filter by."
+      : null;
+
   const catalogTotal = catalog
     ? catalog.types.reduce((n, e) => n + e.count + e.archived_count, 0)
     : null;
@@ -403,6 +461,7 @@ export function TasksPage() {
       outcome.length > 0
         ? `${outcome.join(" or ")} outcome${outcomeTypes?.length ? ` (${outcomeTypes.join(", ")})` : ""}`
         : null,
+      stateFilter.length > 0 ? `state ${stateFilter.join(" or ")}` : null,
     ]
       .filter(Boolean)
       .map((part) => ` · ${part}`)
@@ -415,7 +474,11 @@ export function TasksPage() {
   }
 
   const hasFilters =
-    typeFilter.length > 0 || searchMode || blocked || outcome.length > 0;
+    typeFilter.length > 0 ||
+    stateFilter.length > 0 ||
+    searchMode ||
+    blocked ||
+    outcome.length > 0;
   const noOutcomeTypes =
     outcome.length > 0 && listQuery.data?.scope?.outcome_types?.length === 0;
   let emptyText: string;
@@ -423,7 +486,12 @@ export function TasksPage() {
     emptyText = `No tasks match “${urlQ}”.`;
   } else if (noOutcomeTypes) {
     emptyText = `No task type declares a ${outcome.join(" or ")} outcome, so none can match.`;
-  } else if (blocked && typeFilter.length === 0 && outcome.length === 0) {
+  } else if (
+    blocked &&
+    typeFilter.length === 0 &&
+    outcome.length === 0 &&
+    stateFilter.length === 0
+  ) {
     emptyText = "No open tasks are waiting on prerequisites.";
   } else if (hasFilters) {
     emptyText = "No tasks match these filters.";
@@ -470,6 +538,15 @@ export function TasksPage() {
           onChange={setTypeFilter}
           optionMeta={typeCount}
         />
+        <MultiSelectFilter
+          label="State"
+          options={stateOptions}
+          groups={stateGroups}
+          selected={selectedStates}
+          onChange={setStateFilter}
+          disabled={searchMode}
+          describedBy={stateNote ? stateNoteId : undefined}
+        />
         {!searchMode && (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <Checkbox
@@ -484,12 +561,21 @@ export function TasksPage() {
             </label>
           </div>
         )}
-        {(typeFilter.length > 0 || qInput || blocked || outcome.length > 0) && (
+        {(typeFilter.length > 0 ||
+          stateFilter.length > 0 ||
+          qInput ||
+          blocked ||
+          outcome.length > 0) && (
           <Button variant="ghost" size="sm" onClick={resetFilters}>
             Reset
           </Button>
         )}
       </div>
+      {stateNote && (
+        <p id={stateNoteId} className="text-xs text-muted-foreground">
+          {stateNote}
+        </p>
+      )}
 
       {catalogQuery.isError && !catalog && (
         <SectionFailure
@@ -559,6 +645,32 @@ export function TasksPage() {
               </button>
             </span>
           )}
+        </div>
+      )}
+
+      {!searchMode && stateFilter.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {stateFilter.map((s) => (
+            <span
+              key={s}
+              className="inline-flex items-center gap-1 rounded-full bg-tint-blue-08 px-2.5 py-0.5 font-mono text-[11px] text-signal-blue"
+            >
+              state: {s}
+              {missingStates.includes(s) && (
+                <span className="text-muted-foreground">(not declared)</span>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  setStateFilter(stateFilter.filter((x) => x !== s))
+                }
+                className="flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                aria-label={`Remove state filter: ${s}`}
+              >
+                <RemoveIcon />
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
@@ -648,9 +760,15 @@ export function TasksPage() {
                   >
                     Type
                   </SortableHead>
-                  <TableHead title="Lifecycle state declared by the task type">
+                  <SortableHead
+                    sortKey="state"
+                    active={sort.key === "state"}
+                    dir={sort.key === "state" ? sort.dir : null}
+                    onSort={() => toggleSort("state")}
+                    title="Lifecycle state declared by the task type"
+                  >
                     State
-                  </TableHead>
+                  </SortableHead>
                   <SortableHead
                     sortKey="updated"
                     active={sort.key === "updated"}

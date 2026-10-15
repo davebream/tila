@@ -1951,9 +1951,11 @@ such as `team/a/config`, but excludes `team/ab`. Lists filter before counts and
 pagination, so a restricted listing that is empty cannot be told apart from one
 that was filtered; `GET /records/_types` likewise never reports `incomplete`
 (schema fetch or parse failures) to a restricted key. Restricted keys cannot use
-project-wide search, journal, summary,
-exports, artifact access or global maintenance. Unsafe derived task views are
-also denied, including journal replay, handoffs, and re-entry. Unrestricted
+project-wide search, summary, exports, artifact access or global maintenance,
+and cannot append to the journal or move a cursor. Unsafe derived task views are
+also denied, including handoffs and re-entry. They can read the journal's list,
+replay and participant cursor, filtered to what they may read; see
+[Scoped journal reads](#scoped-journal-reads-518). Unrestricted
 handoff access requires journal, task, record, artifact, and claim read capabilities;
 creation also requires `tasks:write`. Re-entry additionally requires summary and
 signal reads. Updating a journal cursor requires `journal:read` and at least
@@ -2006,11 +2008,129 @@ tila token issue --name worker --principal 'service:<uuid>' --role participant \
   session, run ceiling, workload binding or imported policy can never read or
   write more than its parent on either side.
 
+#### Authoring record limits in the dashboard
+
+The policy form used when issuing a credential, creating an invitation or
+editing a workload binding has a **Record access** control with three modes:
+
+| Mode | Writes |
+|---|---|
+| Every record the capabilities allow | no record limit |
+| Limit reads and writes to the same records | `records` (both sides) |
+| Limit reads and writes separately | `records_read` and `records_write` |
+
+Rules are one per line: `type` (every key of the type), `type/key-prefix` (that
+key and the keys below it, not siblings that merely start with the same
+characters) or `type (no keys)` (a rule that admits nothing). In either limited
+mode an empty list allows no record; removing every limit is its own mode, so
+clearing a list never widens access. An empty key prefix (`type/`) is refused
+instead of being read as the whole type, and a malformed line is reported with
+its list, line number and reason.
+
+- Opening a policy and saving it without editing a list writes that list back
+  as it was stored, including `records: []`, a rule with `key_prefixes: []` and
+  `task_types: []`. Earlier dashboards dropped these limits when saving.
+- Editing one side leaves the other as stored. A policy that left a side out
+  keeps it out, which denies it. The two forms are never written together.
+- Switching modes keeps what was typed in each mode and shows it again when you
+  return. The only text carried across modes is a single list that becomes both
+  sides of a separate limit, and two identical sides that become a single list.
+  A mode that has not been filled in yet is an empty list, which allows no
+  record, never a copy of a different rule.
+- Beneath the lists the form states what the policy reads and writes, treating a
+  side as `none` when its capability (`records:read` or `records:write`) is not
+  granted or the role is below it. The policy summary in credential, invitation
+  and binding lists states both sides with their key prefixes.
+
+The dashboard only decides which controls to offer; the Worker enforces both
+sides. Records and the Overview's record counts are hidden from a credential
+whose read side admits nothing. A credential that may write a key it cannot read
+is offered the create (for a type it can see) but the new record is not opened,
+because the detail page reads it. The catalog lists only readable types, so the
+create form cannot be built for a type that is writable but not readable; use
+the CLI or API for that. `tila token issue --restrictions` accepts the same JSON
+shape and reports an invalid one against the flag.
+
 Upgrade note: policies that use `records_read` or `records_write` cannot be
 parsed by a Worker from before this change, because policy objects are strict.
 That Worker rejects them and the credential has no access; it does not fall back
 to broader access. Deploy the Worker before issuing such credentials, and
 reissue them as `records` policies if you roll back.
+
+### Scoped journal reads (#518)
+
+A namespace-restricted key may call `GET /journal`, `GET /journal/replay` and
+`GET /journal/cursor` (the caller's own participant cursor). It needs
+`journal:read`, and it sees only events it could read through the resource
+itself:
+
+| Event kinds | Visible when |
+|---|---|
+| `entity.created`, `entity.updated`, `entity.archived` | The key has `tasks:read` and the task's type is in `task_types`. While `task_types` is set, the task's parent, if it has one, must exist and have a permitted type: the rule a task list applies. |
+| `claim.acquired`, `claim.renewed`, `claim.released`, `claim.expired` | The key has `claims:read` and the claim's resource is `<type>:<id>` of a readable task of that type, or `record:<type>/<key>` admitted by the record **read** side. |
+| `record.created`, `record.updated`, `record.archived`, `record.unarchived` | The key has `records:read` and `record:<type>/<key>` is admitted by `records_read` (or by the legacy `records` list). A policy that only writes records sees none. |
+
+Every other event is hidden: schema, room, conversation, delivery, question,
+queue, attempt, artifact, handoff, gate, template and project events, and
+custom project reports (`custom.reported`, so `event_name` and `correlation_id`
+select nothing). A kind this release does not know is hidden until it is added
+on purpose, as is an event whose resource is not exactly the shape its kind
+produces (a custom claim name, a bare id on a claim) or whose payload holds
+anything beyond what its kind carries. Live and archived events are judged by
+one rule against current state at read time, so a task re-parented later
+changes what its earlier events show.
+
+These stay denied to restricted keys: appending to the journal,
+`PUT /journal/cursor`, handoffs, re-entry and journal archiving.
+
+**What a restricted reader can still learn.** Sequence numbers are project-wide:
+`seq`, `through_seq`, `next_after_seq` and `lastArchivedSeq` show how much the
+project has recorded, not what it was. This is a deliberate decision. A visible
+event keeps its actor identity (`principal_id`, `participant_id`,
+`environment`, `token_id`). Nothing else about a hidden event is reported: not
+its kind, resource, payload, count, or whether more hidden events follow.
+
+**Paging contract.** A page holds up to `limit` readable events in sequence
+order and never splits or repeats one. Hidden events move the cursor but are not
+counted.
+
+- `GET /journal?after_seq=N&limit=L` returns the next `L` readable events and
+  `has_more` / `next_after_seq`. `limit` must be an integer from 1 to 1000; a
+  larger value is refused with `400`, never clamped.
+- `GET /journal?limit=L` (no `after_seq`) returns the newest `L` readable
+  events, newest first, with `has_more` only.
+- `GET /journal/replay?after_seq=N&limit=L[&through_seq=T]` returns the same
+  events from live and archived history, with `next_after_seq`, `through_seq`
+  (the project's global sequence) and `has_more`. The whole examined range is
+  proven complete before anything is filtered, so lost history fails with
+  `journal-history-unavailable` (503) or `journal-history-conflict` (409) even
+  when everything in it was hidden. Those errors name a sequence only.
+
+**Bounded work.** A restricted reader may be given a journal where almost
+nothing is readable, so the cost of a request never depends on how much is
+hidden. Each request examines at most 20,000 sequences, in windows that grow
+from 1,000 to 8,000. When that ends a request before the page is full, the
+response says `has_more: true` and `next_after_seq` is the last sequence
+examined; the next request continues from it. **A page shorter than `limit` is
+"caught up" only when `has_more` is `false`.** A range that holds only hidden
+events answers with no events and `has_more: true` until the cursor reaches the
+end, so clients loop on `has_more` and never on page size. The cursor depends on
+sequence numbers and on where readable events sit, not on how many hidden events
+a window held.
+
+- A forward list or replay stops early on a readable event beyond a full page:
+  `next_after_seq` is then the last returned sequence and `has_more` is `true`.
+- A tail list is incomplete (`has_more: true`) when the newest 20,000 sequences
+  held fewer than `limit` readable events. Read older ones by paging forward
+  with `after_seq`.
+- `GET /journal` with `after_seq` below `lastArchivedSeq` returns no events,
+  `archived: true` and `has_more: true`; read that range with `/journal/replay`.
+- Unrestricted readers are unchanged: their list carries no `has_more` or
+  `next_after_seq`, and their replay and cursor behave as before.
+
+No migration is involved. A Worker from before this change answers restricted
+keys `403` on these routes, so the new responses only appear after the Worker is
+deployed.
 
 ### Expiry, rotation and revocation
 

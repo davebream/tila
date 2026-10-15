@@ -61,7 +61,21 @@ export interface EntityListFilter {
   blocked?: boolean;
   /** Non-empty list of lifecycle outcomes; types without a declaration cannot match. */
   outcome?: LifecycleOutcome[];
-  sort?: "created_at" | "updated_at" | "type" | "title" | "status" | "id";
+  /**
+   * Non-empty list of task states. A task's state is the value of its type's
+   * lifecycle field (or `status` for a type with no lifecycle), so one list
+   * spans every type, whatever field each uses.
+   */
+  state?: string[];
+  /** `state` orders by that same state; tasks without one sort first ascending. */
+  sort?:
+    | "created_at"
+    | "updated_at"
+    | "type"
+    | "title"
+    | "status"
+    | "state"
+    | "id";
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;

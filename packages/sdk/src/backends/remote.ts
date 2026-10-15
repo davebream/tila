@@ -50,6 +50,7 @@ import {
   LifecycleOutcomeSchema,
   SchemaApplyWarningSchema,
   SchemaPreviewResponseSchema,
+  TaskStateListSchema,
 } from "@tila/schemas";
 import type {
   ArtifactReviewRequest,
@@ -341,6 +342,8 @@ export class RemoteBackend
         .min(1)
         .parse(filter.outcome)
         .join(",");
+    if (filter?.state !== undefined)
+      query.state = TaskStateListSchema.parse(filter.state).join(",");
     // Pagination and sorting params
     if (filter?.sort) query.sort = filter.sort;
     if (filter?.order) query.order = filter.order;
