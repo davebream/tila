@@ -1,4 +1,5 @@
 import {
+  type Entity,
   type QueueBlockReason,
   type QueueClaimCommand,
   QueueClaimCommandSchema,
@@ -578,6 +579,31 @@ function leaseLapsed(attempt: WorkAttempt | undefined, now: number) {
     attempt.lease_expires_at <= now
   );
 }
+/**
+ * The compact queue view of a task: its identity and only the fields a row
+ * shows (`title`, `name`) plus the type's declared lifecycle state field. The
+ * values are copied verbatim from the stored data, so a compact entry never
+ * carries anything the full entry would not.
+ */
+function compactTask(
+  snapshot: ReadinessSnapshot,
+  task: Entity | undefined,
+): { id: string; type: string; data: Record<string, unknown> } | null {
+  if (!task) return null;
+  const fields = new Set(["title", "name"]);
+  const lifecycle = snapshot.definition?.work_units[task.type]?.lifecycle;
+  if (lifecycle) fields.add(lifecycle.field);
+  return {
+    id: task.id,
+    type: task.type,
+    // fromEntries defines own properties, so a field named `__proto__` is data.
+    data: Object.fromEntries(
+      [...fields]
+        .filter((field) => Object.hasOwn(task.data, field))
+        .map((field) => [field, task.data[field]]),
+    ),
+  };
+}
 /** Project-wide operational totals in the retained journal's last 24 hours. */
 export function diagnostics(db: ProjectDatabase, now = Date.now()) {
   const since = now - 86_400_000;
@@ -714,7 +740,11 @@ export function inspect(
         .slice(query.offset, query.offset + query.limit)
         .map((entry) => ({
           entry,
-          task: snapshot.entities.get(entry.task_id) ?? null,
+          // Compact narrows only what is returned: the full snapshot above is
+          // still read, so this saves wire bytes, not server work.
+          task: query.compact
+            ? compactTask(snapshot, snapshot.entities.get(entry.task_id))
+            : (snapshot.entities.get(entry.task_id) ?? null),
           attempt: latest.get(entry.id) ?? null,
           block_reasons:
             entry.state === "queued"

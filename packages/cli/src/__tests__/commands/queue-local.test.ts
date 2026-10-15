@@ -76,7 +76,11 @@ values = ["open", "done"]
       undefined,
       { expected_revision: 0 },
     );
-    await sdk.tasks.create("one", "task", { status: "open" });
+    await sdk.tasks.create("one", "task", {
+      status: "open",
+      title: "One",
+      notes: "A long note. ".repeat(40),
+    });
     expect(
       command("queue", "configure", {
         idempotency_key: "enable",
@@ -87,6 +91,20 @@ values = ["open", "done"]
       }).ok,
     ).toBe(true);
     command("queue", "enroll", { idempotency_key: "enroll", task_id: "one" });
+    // The additive compact filter reaches the embedded backend unchanged. The
+    // CLI envelope presents the entry list as `items`.
+    const full = command("queue", "inspect").result;
+    const compact = command("queue", "inspect", { compact: true }).result;
+    expect(full.items[0].task.data.notes).toContain("A long note.");
+    expect(compact.items[0].task).toEqual({
+      id: "one",
+      type: "task",
+      data: { status: "open", title: "One" },
+    });
+    expect(compact.items[0].entry).toEqual(full.items[0].entry);
+    expect(compact.items).toEqual(
+      (await sdk.queue.inspect({ compact: true })).entries,
+    );
     const grant = command("queue", "claim", {
       idempotency_key: "claim",
     }).result;

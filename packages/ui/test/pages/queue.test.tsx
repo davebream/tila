@@ -1,8 +1,9 @@
+import { useTask } from "@/hooks/use-api";
 import { QueuePage } from "@/pages/queue";
 import userEvent from "@testing-library/user-event";
 import type { QueueInspection, WorkAttempt } from "@tila/schemas";
 import { http, HttpResponse } from "msw";
-import { Route, Routes } from "react-router";
+import { Route, Routes, useParams } from "react-router";
 import { server } from "../mocks/server";
 import {
   act,
@@ -634,6 +635,142 @@ it("warns about expired execution authority while retaining occupied capacity", 
     screen.getByText("Authority expired — reconciliation required"),
   ).toBeInTheDocument();
   expect(screen.getByText("1 / 20")).toBeInTheDocument();
+});
+
+describe("compact listing", () => {
+  /** What the server returns for `compact=true`: `task.data` narrowed. */
+  const narrowed = (view: QueueInspection["entries"][number]) => ({
+    ...view,
+    task: view.task && {
+      id: view.task.id,
+      type: view.task.type,
+      data: { title: view.task.data.title },
+    },
+  });
+  const heavy = (rows: QueueInspection["entries"]) =>
+    rows.map((view) => ({
+      ...view,
+      task: view.task && {
+        ...view.task,
+        data: {
+          ...view.task.data,
+          description: "A long brief. ".repeat(200),
+          acceptance: "All callers compile. ".repeat(40),
+        },
+      },
+    }));
+
+  it("requests the compact listing, once per refresh, with the page's filters", async () => {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get("*/projects/test-project/queue", ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        requests.push(query);
+        return HttpResponse.json({
+          result: {
+            ...data,
+            total: 3,
+            entries: entries(3).map(narrowed),
+          },
+        });
+      }),
+    );
+    renderQueue("?state=backlog&priority=2&offset=0");
+    expect(await screen.findByText("Work 0")).toBeInTheDocument();
+    expect(requests[0].get("compact")).toBe("true");
+    expect(requests[0].get("state")).toBe("backlog");
+    expect(requests[0].get("priority")).toBe("2");
+    expect(requests[0].get("limit")).toBe("100");
+  });
+
+  it("renders exactly the same rows from compact data as from full data", async () => {
+    const rowsOf = () =>
+      screen.getAllByRole("row").map((row) => row.textContent);
+    const render = async (rows: QueueInspection["entries"]) => {
+      server.use(
+        http.get("*/projects/test-project/queue", () =>
+          HttpResponse.json({
+            result: { ...data, total: rows.length, entries: rows },
+          }),
+        ),
+      );
+      const rendered = renderQueue();
+      await screen.findByText("Work 0");
+      const text = rowsOf();
+      rendered.unmount();
+      return text;
+    };
+    const full = heavy(entries(4));
+    const fromFull = await render(full);
+    const fromCompact = await render(full.map(narrowed));
+    expect(fromCompact).toEqual(fromFull);
+    expect(fromCompact.length).toBe(5);
+  });
+
+  it("opens a row on the full task, not the compact view", async () => {
+    const user = userEvent.setup();
+    const taskRequests: URL[] = [];
+    const queueRequests: URLSearchParams[] = [];
+    function Opened() {
+      const { entityId = "" } = useParams();
+      const task = useTask(entityId);
+      return (
+        <p>
+          {task.data
+            ? `Opened ${String(task.data.entity.data.description)}`
+            : "Loading task"}
+        </p>
+      );
+    }
+    server.use(
+      http.get("*/projects/test-project/queue", ({ request }) => {
+        queueRequests.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          result: {
+            ...data,
+            total: 2,
+            entries: entries(2).map(narrowed),
+          },
+        });
+      }),
+      http.get("*/projects/test-project/tasks/:id", ({ request, params }) => {
+        taskRequests.push(new URL(request.url));
+        return HttpResponse.json({
+          ok: true,
+          entity: {
+            id: params.id,
+            type: "task",
+            schema_version: 1,
+            data: { title: "Work 0", description: "the complete brief" },
+            archived: 0,
+            created_at: 0,
+            updated_at: 0,
+            created_by: "test",
+            tags: [],
+          },
+          relationships: [],
+        });
+      }),
+    );
+    renderWithProviders(
+      <Routes>
+        <Route path="/p/:projectId/queue" element={<QueuePage />} />
+        <Route path="/p/:projectId/tasks/:entityId" element={<Opened />} />
+      </Routes>,
+      { route: "/p/test-project/queue" },
+    );
+    await user.click(await screen.findByRole("link", { name: "Work 0" }));
+    expect(
+      await screen.findByText("Opened the complete brief"),
+    ).toBeInTheDocument();
+    expect(queueRequests.every((q) => q.get("compact") === "true")).toBe(true);
+    expect(taskRequests.length).toBeGreaterThan(0);
+    for (const url of taskRequests) {
+      expect(url.pathname.endsWith("/tasks/task-0")).toBe(true);
+      expect(url.searchParams.has("compact")).toBe(false);
+      expect(url.searchParams.has("fields")).toBe(false);
+    }
+  });
 });
 
 it("the lapsed-lease filter reaches the server and can be cleared", async () => {
