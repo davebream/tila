@@ -1,6 +1,8 @@
 import {
   decisionViewFromSearch,
   questionQueryFromSearch,
+  taskFiltersFromSearch,
+  taskListParams,
 } from "@/lib/list-queries";
 
 const search = (value: string) => new URLSearchParams(value);
@@ -44,5 +46,36 @@ describe("questionQueryFromSearch", () => {
       "superseded",
     );
     expect(decisionViewFromSearch(search("?view=MINE"))).toBe("mine");
+  });
+});
+
+describe("task state filter query", () => {
+  test("reads the comma list from the URL and drops empty entries", () => {
+    expect(
+      taskFiltersFromSearch(search("state=in-review,,done")).state,
+    ).toEqual(["in-review", "done"]);
+    expect(taskFiltersFromSearch(search("")).state).toEqual([]);
+    expect(taskFiltersFromSearch(search("state=")).state).toEqual([]);
+  });
+
+  test("passes the states to the API and leaves the other filters alone", () => {
+    const filters = taskFiltersFromSearch(
+      search("type=bug&blocked=1&outcome=failure&state=in-review"),
+    );
+    expect(taskListParams(filters)).toEqual({
+      type: ["bug"],
+      archived: "0",
+      blocked: "1",
+      outcome: ["failure"],
+      state: ["in-review"],
+    });
+    // An Overview link without a state sends none.
+    expect(taskListParams(taskFiltersFromSearch(search("blocked=1")))).toEqual({
+      type: undefined,
+      archived: "0",
+      blocked: "1",
+      outcome: undefined,
+      state: undefined,
+    });
   });
 });

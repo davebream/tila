@@ -249,6 +249,323 @@ describe("TasksPage attention filters", () => {
   });
 });
 
+// #525: the State column and the State filter and sort read the same value:
+// the field each task's own type declares as its lifecycle, else `status`.
+describe("TasksPage state filter and sort", () => {
+  const REVIEW_LIFECYCLE: NonNullable<WorkCatalogEntry["definition"]> = {
+    fields: [
+      {
+        name: "phase",
+        type: "enum",
+        required: true,
+        values: ["new", "in-review", "fixed", "wontfix"],
+      },
+    ],
+    lifecycle: {
+      field: "phase",
+      dispatchable: ["new"],
+      terminal: ["fixed"],
+      dependency_satisfied: ["fixed"],
+      on_start: "in-review",
+    },
+  };
+  const NOTE_DEFINITION: NonNullable<WorkCatalogEntry["definition"]> = {
+    fields: [
+      {
+        name: "status",
+        type: "enum",
+        required: false,
+        values: ["draft", "in-review", "published"],
+      },
+    ],
+  };
+  const CATALOG: WorkCatalogEntry[] = [
+    declaredEntry("job", 2, JOB_LIFECYCLE),
+    declaredEntry("bug", 2, REVIEW_LIFECYCLE),
+    declaredEntry("note", 2, NOTE_DEFINITION),
+  ];
+  const TASKS = [
+    makeTask("job-1", { type: "job", data: { state: "running" } }),
+    makeTask("job-2", { type: "job", data: { state: "queued" } }),
+    makeTask("bug-1", { type: "bug", data: { phase: "in-review" } }),
+    makeTask("bug-2", { type: "bug", data: { phase: "new", status: "fixed" } }),
+    makeTask("note-1", { type: "note", data: { status: "in-review" } }),
+    makeTask("note-2", { type: "note", data: { status: "draft" } }),
+  ];
+  const FIELDS = { job: "state", bug: "phase" };
+
+  function renderStates(route = "/p/test-project/tasks") {
+    const requests: URLSearchParams[] = [];
+    server.use(
+      catalogHandler(CATALOG),
+      pagedTasksHandler(TASKS, {
+        stateFields: FIELDS,
+        onRequest: (p) => requests.push(p),
+      }),
+    );
+    renderTasks(route);
+    return requests;
+  }
+
+  test("offers the states every declared type names, once, from the catalog", async () => {
+    const user = userEvent.setup();
+    renderStates();
+    await screen.findByText("job-1");
+
+    await user.click(screen.getByRole("button", { name: "State" }));
+
+    const options = screen
+      .getAllByRole("checkbox")
+      .map((box) => box.getAttribute("id"))
+      .filter(Boolean);
+    expect(options.length).toBeGreaterThan(0);
+    for (const state of [
+      "queued",
+      "running",
+      "shipped",
+      "failed",
+      "new",
+      "in-review",
+      "fixed",
+      "wontfix",
+      "draft",
+      "published",
+    ])
+      expect(screen.getByRole("checkbox", { name: state })).toBeInTheDocument();
+    // `in-review` is named by two types and listed once.
+    expect(screen.getAllByRole("checkbox", { name: "in-review" })).toHaveLength(
+      1,
+    );
+  });
+
+  test("filters server-side across types and keeps the column in agreement", async () => {
+    const user = userEvent.setup();
+    const requests = renderStates();
+    await screen.findByText("job-1");
+
+    await user.click(screen.getByRole("button", { name: "State" }));
+    await user.click(screen.getByRole("checkbox", { name: "in-review" }));
+
+    await waitFor(() =>
+      expect(requests.at(-1)?.get("state")).toBe("in-review"),
+    );
+    expect(urlParam("state")).toBe("in-review");
+    // bug-1 holds it in `phase`, note-1 in `status`: neither is `bug-2`'s
+    // decoy `status`, and no job is in review.
+    await waitFor(() =>
+      expect(screen.queryByText("job-1")).not.toBeInTheDocument(),
+    );
+    for (const id of ["bug-1", "note-1"]) {
+      const row = screen.getByText(id).closest("tr") as HTMLElement;
+      expect(within(row).getByText("in-review")).toBeInTheDocument();
+    }
+    expect(screen.queryByText("bug-2")).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("2 tasks · excluding archived · state in-review"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove state filter: in-review" }),
+    ).toBeInTheDocument();
+  });
+
+  test("reads the state filter from the URL and removes it from its chip", async () => {
+    const user = userEvent.setup();
+    const requests = renderStates("/p/test-project/tasks?state=queued,running");
+
+    expect(await screen.findByText("job-1")).toBeInTheDocument();
+    expect(requests.at(-1)?.get("state")).toBe("queued,running");
+    expect(
+      screen.getByRole("button", { name: "State: 2" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove state filter: queued" }),
+    );
+    await waitFor(() => expect(urlParam("state")).toBe("running"));
+    await user.click(
+      screen.getByRole("button", { name: "Remove state filter: running" }),
+    );
+    await waitFor(() => expect(urlParam("state")).toBeNull());
+    expect(requests.at(-1)?.get("state")).toBeNull();
+  });
+
+  test("a selected state the catalog does not declare stays visible and is sent", async () => {
+    const requests = renderStates("/p/test-project/tasks?state=retired");
+
+    expect(await screen.findByText("(not declared)")).toBeInTheDocument();
+    expect(screen.getByText("state: retired")).toBeInTheDocument();
+    expect(requests.at(-1)?.get("state")).toBe("retired");
+    expect(
+      await screen.findByText("No tasks match these filters."),
+    ).toBeInTheDocument();
+  });
+
+  test("the State header sorts on the server and toggles its direction", async () => {
+    const user = userEvent.setup();
+    const requests = renderStates();
+    await screen.findByText("job-1");
+
+    const header = () => screen.getByRole("columnheader", { name: /^State/ });
+    expect(header()).toHaveAttribute("aria-sort", "none");
+    await user.click(header());
+
+    await waitFor(() => expect(requests.at(-1)?.get("sort")).toBe("state"));
+    expect(requests.at(-1)?.get("order")).toBe("desc");
+    expect(urlParam("sort")).toBe("state:desc");
+    await waitFor(() =>
+      expect(header()).toHaveAttribute("aria-sort", "descending"),
+    );
+    const shown = () =>
+      screen
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+        .filter((id) => /^(job|bug|note)-\d$/.test(id ?? ""));
+    // running, queued, new, then the two in-review tasks (id descending), draft.
+    await waitFor(() =>
+      expect(shown()).toEqual([
+        "job-1",
+        "job-2",
+        "bug-2",
+        "note-1",
+        "bug-1",
+        "note-2",
+      ]),
+    );
+
+    await user.click(header());
+    await waitFor(() => expect(urlParam("sort")).toBe("state:asc"));
+    await waitFor(() =>
+      expect(header()).toHaveAttribute("aria-sort", "ascending"),
+    );
+    await waitFor(() =>
+      expect(shown()).toEqual([
+        "note-2",
+        "bug-1",
+        "note-1",
+        "bug-2",
+        "job-2",
+        "job-1",
+      ]),
+    );
+  });
+
+  test("changing the state filter or sort drops the page cursor", async () => {
+    const user = userEvent.setup();
+    server.use(
+      catalogHandler([declaredEntry("task", 260)]),
+      pagedTasksHandler(manyTasks(260)),
+    );
+    renderTasks();
+    await screen.findByText("task-001");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("task-101");
+    expect(urlParam("after")).not.toBeNull();
+
+    await user.click(screen.getByRole("columnheader", { name: /^State/ }));
+    await waitFor(() => expect(urlParam("sort")).toBe("state:desc"));
+    expect(urlParam("after")).toBeNull();
+  });
+
+  test("search disables the control with a reason and does not send state", async () => {
+    const searches: URLSearchParams[] = [];
+    server.use(
+      catalogHandler(CATALOG),
+      searchHandler(
+        [
+          {
+            entity_id: "bug-1",
+            entity_type: "bug",
+            name: "A bug",
+            snippet: null,
+          },
+        ],
+        { onRequest: (p) => searches.push(p) },
+      ),
+    );
+    renderTasks("/p/test-project/tasks?q=bug&state=in-review");
+
+    expect(await screen.findByText("A bug")).toBeInTheDocument();
+    const control = screen.getByRole("button", { name: "State" });
+    expect(control).toBeDisabled();
+    expect(control).toHaveAccessibleDescription(
+      "State filters the task list, not search results.",
+    );
+    expect(searches.at(-1)?.has("state")).toBe(false);
+    // No chip and no count imply the filter applied to these results.
+    expect(
+      screen.queryByRole("button", { name: /Remove state filter/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("searching drops the state filter like the other filters search cannot apply", async () => {
+    const user = userEvent.setup();
+    renderStates("/p/test-project/tasks?state=in-review");
+    await screen.findByRole("button", {
+      name: "Remove state filter: in-review",
+    });
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search tasks" }),
+      "auth",
+    );
+    await waitFor(() => expect(urlParam("q")).toBe("auth"));
+    expect(urlParam("state")).toBeNull();
+  });
+
+  test("Reset clears the state filter with the others", async () => {
+    const user = userEvent.setup();
+    renderStates("/p/test-project/tasks?type=bug&state=new");
+    await screen.findByText("bug-2");
+
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    await waitFor(() => expect(urlParam("state")).toBeNull());
+    expect(urlParam("type")).toBeNull();
+  });
+
+  test("is disabled with a reason when no type declares a state", async () => {
+    server.use(
+      catalogHandler([declaredEntry("plain", 1)]),
+      pagedTasksHandler([makeTask("plain-1", { type: "plain" })]),
+    );
+    renderTasks();
+    await screen.findByText("plain-1");
+
+    const control = screen.getByRole("button", { name: "State" });
+    expect(control).toBeDisabled();
+    expect(control).toHaveAccessibleDescription(
+      "No task type declares states to filter by.",
+    );
+  });
+
+  // The #308 scale harness selects these by role and exact name; a second
+  // filter control must not make any of them ambiguous.
+  test("keeps the harness selectors unique with a state filter set", async () => {
+    const user = userEvent.setup();
+    renderStates("/p/test-project/tasks?state=in-review");
+    await screen.findByText("bug-1");
+
+    expect(
+      screen.queryAllByRole("navigation", { name: "Task pages" }).length,
+    ).toBeLessThanOrEqual(1);
+    expect(
+      screen.getAllByRole("searchbox", { name: "Search tasks" }),
+    ).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Type" })).toHaveLength(1);
+    expect(screen.queryAllByRole("button", { name: "Clear" })).toHaveLength(0);
+
+    // The harness selects a type, closes the menu, then reopens it as
+    // "Type: 1" to press Clear.
+    await user.click(screen.getByRole("button", { name: "Type" }));
+    await user.click(screen.getByRole("checkbox", { name: "bug" }));
+    await user.keyboard("{Escape}");
+    await user.click(await screen.findByRole("button", { name: "Type: 1" }));
+    // Exactly one Clear: the Type menu's. The State menu is closed.
+    expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
+    // And one page-level Reset, which is a different name.
+    expect(screen.getAllByRole("button", { name: "Reset" })).toHaveLength(1);
+  });
+});
+
 describe("TasksPage presentation", () => {
   test("titles come from presentation metadata; a missing title is a dash", async () => {
     server.use(

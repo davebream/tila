@@ -103,6 +103,27 @@ describe("task catalog and search requests", () => {
     expect(sent?.get("sort")).toBe("id");
   });
 
+  test("listTasks sends the state filter as one comma list and the state sort", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/projects/*/tasks", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ ok: true, entities: [] });
+      }),
+    );
+    await listTasks("test-project", {
+      state: ["in-review", "done"],
+      sort: "state",
+      order: "asc",
+    });
+    let sent = params as URLSearchParams | null;
+    expect(sent?.get("state")).toBe("in-review,done");
+    expect(sent?.get("sort")).toBe("state");
+    await listTasks("test-project", { state: [] });
+    sent = params as URLSearchParams | null;
+    expect(sent?.has("state")).toBe(false);
+  });
+
   test("getWorkCatalog reads the task type catalog", async () => {
     let path = "";
     server.use(
