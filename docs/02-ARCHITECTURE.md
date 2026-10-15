@@ -3828,6 +3828,43 @@ Optional `corrects_seq` is a positive safe integer referencing an earlier custom
 report. Corrections validate live or archived history and current reference
 access, then append another event. Existing history is immutable.
 
+Correction authority. A correction is accepted only from the original reporter
+of the report it corrects, or from a project maintainer or owner:
+
+- The original reporter is the `principal_id` of the first report in the chain:
+  the event reached by following `corrects_seq` until an event has none. The
+  comparison is on principal only, never on participant, `actor`, or a request
+  field, and a correction event records its own corrector's `principal_id`. A
+  correction, including a maintainer's, does not change the chain's original
+  reporter. The original reporter can therefore correct any later correction,
+  and a maintainer who corrected once gains no standing over the chain beyond
+  their role.
+- The role is the effective project role the Worker resolved for the request:
+  current membership, lowered by any credential ceiling, with mirrored GitHub
+  maintainer authority re-verified as for other maintainer operations. It is
+  never taken from the request; unknown identity or role fields are rejected as
+  unknown contract fields. A role that cannot be verified counts as participant.
+- Anyone else, including a participant holding `journal:append` and
+  `journal:read`, receives `403 report-correction-denied` with
+  `retryable: false`. A refusal writes no event, receipt, or rate count and
+  is the same on every retry. The remedy is a new report without `corrects_seq`,
+  or a maintainer's correction.
+- The original reporter is established by reading the chain, live or archived,
+  before anything is written. A link that is missing, unreadable, not a report,
+  or not pointing to an earlier event fails with `journal-history-unavailable`
+  (503) and writes nothing. At most 256 links are followed; a longer chain can
+  be extended only by a maintainer or owner, and other callers receive
+  `report-correction-denied`.
+- A maintainer or owner needs only the report being corrected. They do not read
+  the rest of the chain, so the 256-link bound and damage further back do not
+  apply to them.
+- Authority is evaluated on every attempt, including a retry of an accepted
+  correction, and before the receipt is consulted.
+- Identity is the authenticated principal. A CLI or API token and a dashboard
+  session are different principals even for the same person, so a report sent
+  with one can be corrected by the other only through a maintainer or owner role.
+  Corrections recorded before this rule stay in history unchanged.
+
 Append requires current project write authority, an explicit participant, and
 `journal:append`. Linked references additionally require their read capabilities;
 claim-bound reports require `claims:read`, and corrections require `journal:read`.
@@ -3841,8 +3878,8 @@ partial expression indexes for custom event name and correlation. The event,
 receipt, and counters commit in one project SQLite transaction. D1 response replay
 is bypassed. Keys are scoped to project, principal, and participant; credential
 rotation does not reset them. Canonical JSON hashing ignores object-key order.
-Current permissions, reference access, and claim authority are rechecked even on
-retry. An authorized identical retry returns the original event and attribution;
+Current permissions, reference access, claim authority, and correction authority
+are rechecked even on retry. An authorized identical retry returns the original event and attribution;
 a changed request with the same key fails with `idempotency-key-conflict` (422).
 
 The response is `{ "ok": true, "event": {...}, "dedup_expires_at": <Unix ms> }`.

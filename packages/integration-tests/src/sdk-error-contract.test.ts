@@ -29,6 +29,7 @@ function collectEmittedCodesFromContent(content: string): string[] {
     /this\.deny\(\s*"([a-z][a-z0-9-]*)"/g,
     /ConversationError\(\s*"([a-z][a-z0-9-]*)"/g,
     /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
+    /JournalReportError\(\s*"([a-z][a-z0-9-]*)"/g,
     /QueueError\(\s*"([a-z][a-z0-9-]*)"/g,
     /QuestionError\(\s*"([a-z][a-z0-9-]*)"/g,
     /SchemaPreconditionError\(\s*"([a-z][a-z0-9-]*)"/g,
@@ -151,6 +152,7 @@ describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
 
     "journal-history-unavailable",
     "journal-history-conflict",
+    "report-correction-denied",
     "handoff-not-found",
     "handoff-conflict",
     "artifact-unavailable",
