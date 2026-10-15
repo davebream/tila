@@ -23,6 +23,7 @@ import {
 import {
   ArtifactCommitRecordSchema,
   ArtifactLifecycleRecordSchema,
+  ParticipantIdSchema,
   artifactCommitKey,
   artifactLifecycleKey,
 } from "@tila/schemas";
@@ -62,6 +63,12 @@ export type CloudBackupEndpoint = {
   baseUrl: string;
   token?: string;
   infraToken?: string;
+  /**
+   * Stable participant identity sent as `X-Tila-Participant-Id` on every
+   * operator request. Project routes refuse mutations without one; a fresh
+   * UUID is generated per backup operation when omitted.
+   */
+  participantId?: string;
   cloudflareAccountId?: string;
 };
 
@@ -908,7 +915,13 @@ export async function importProjectBackup(
 }
 
 export class TilaOperatorClient {
-  constructor(private readonly endpoint: CloudBackupEndpoint) {}
+  readonly participantId: string;
+
+  constructor(private readonly endpoint: CloudBackupEndpoint) {
+    this.participantId = ParticipantIdSchema.parse(
+      endpoint.participantId ?? randomUUID(),
+    );
+  }
 
   private prefix(): string {
     if (this.endpoint.infraToken) {
@@ -926,6 +939,7 @@ export class TilaOperatorClient {
         ...init,
         headers: {
           Authorization: `Bearer ${token}`,
+          "X-Tila-Participant-Id": this.participantId,
           ...(init.method && init.method !== "GET"
             ? { "X-Confirm-Slug": this.endpoint.projectId }
             : {}),
@@ -1320,7 +1334,7 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
     safetyBackup = safetyPath(options.archive, destination.projectId);
     await exportCloud(
       {
-        source: destination,
+        source: { ...destination, participantId: client.participantId },
         output: safetyBackup,
         onProgress: options.onProgress,
       },

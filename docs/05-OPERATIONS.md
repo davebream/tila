@@ -1058,6 +1058,8 @@ tila project export --output /absolute/path/project.tila-backup
 
 Export refuses to overwrite its destination. It freezes writes, leaves reads available, streams a consistent snapshot, verifies the final manifest and checksums, rechecks the D1 ACL digest, then unlocks. A failed client eventually releases an export lock through its renewable TTL; missing blobs, archive gaps, contradictory journal ranges, corruption, duplicate paths, and unsafe paths fail visibly and do not produce a completed archive.
 
+A project-token export identifies a participant on every backup request, as all project mutations require. The CLI uses `--participant-id`, then `TILA_PARTICIPANT_ID`, then a process-generated ID; SDK callers pass `participantId` on the cloud endpoint, and a UUID is generated per operation when omitted. The Worker still answers `400 participant-required` to a request without one. Operators holding the infrastructure owner credential can reach the same transfer routes at `/_internal/admin/projects/:projectId/backup/*` (SDK `infraToken`). Only `INFRA_ADMIN_TOKEN` authorizes that route: it answers 404 when the secret is unset and 403 for any other bearer, including a project token, and a request to it never touches the project-token failed-authentication rate limit.
+
 The archive deliberately excludes bearer credentials and hashes, sessions, rate limits, idempotency caches, revoked JTIs/subjects, and deployment-global metadata. Store the archive outside the source Cloudflare account. Archives are not encrypted; protect them with the storage system's encryption and access controls.
 
 ### Restore, resume, and roll back
