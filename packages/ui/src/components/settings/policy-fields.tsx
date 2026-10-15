@@ -24,6 +24,18 @@ const SplitRecords = z.object({
 type SplitRecords = z.infer<typeof SplitRecords>;
 
 /**
+ * The task and record limits a policy held when the form was opened. The
+ * editable lines cannot show an explicit empty list (it denies everything) or
+ * a rule with no key prefixes, and writing those lines back would drop the
+ * limit and widen the policy. A list whose lines are untouched keeps its
+ * stored value instead.
+ */
+const StoredLimits = z.object({
+  task_types: z.array(z.string()).optional(),
+  records: z.array(RecordRestrictionRuleSchema).optional(),
+});
+
+/**
  * A credential policy as the forms edit it: a preset or a custom role and
  * capability list, plus optional namespace restrictions written one per line.
  * Over-broad policies are left for the server to refuse with its own message.
@@ -37,6 +49,7 @@ export const PolicyForm = z.object({
   task_types: z.string(),
   records: z.string(),
   records_split: SplitRecords.optional(),
+  stored: StoredLimits.optional(),
 });
 export type PolicyForm = z.infer<typeof PolicyForm>;
 
@@ -55,6 +68,16 @@ const GROUPS = [...new Set(DELEGABLE.map((cap) => cap.split(":")[0]))].map(
 
 const sameSet = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((value) => b.includes(value));
+const sameLines = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
+/** The editable lines of a record list: a type, or `type/prefix` per prefix. */
+const recordLines = (rules: readonly RecordRestrictionRule[]) =>
+  rules.flatMap((rule) =>
+    rule.key_prefixes === undefined
+      ? [rule.type]
+      : rule.key_prefixes.map((prefix) => `${rule.type}/${prefix}`),
+  );
 
 export function presetForm(preset: Preset = "read-only"): PolicyForm {
   const policy = CREDENTIAL_PRESETS[preset];
@@ -69,6 +92,14 @@ export function presetForm(preset: Preset = "read-only"): PolicyForm {
 
 export function policyToForm(policy: CredentialPolicy): PolicyForm {
   const { records_read, records_write } = policy.restrictions ?? {};
+  const { task_types, records } = policy.restrictions ?? {};
+  const stored =
+    task_types === undefined && records === undefined
+      ? undefined
+      : {
+          ...(task_types === undefined ? {} : { task_types }),
+          ...(records === undefined ? {} : { records }),
+        };
   const split: SplitRecords | undefined =
     records_read === undefined && records_write === undefined
       ? undefined
@@ -88,14 +119,9 @@ export function policyToForm(policy: CredentialPolicy): PolicyForm {
     role: policy.role,
     capabilities: [...policy.capabilities],
     task_types: (policy.restrictions?.task_types ?? []).join("\n"),
-    records: (policy.restrictions?.records ?? [])
-      .flatMap((rule) =>
-        rule.key_prefixes === undefined
-          ? [rule.type]
-          : rule.key_prefixes.map((prefix) => `${rule.type}/${prefix}`),
-      )
-      .join("\n"),
+    records: recordLines(records ?? []).join("\n"),
     ...(split === undefined ? {} : { records_split: split }),
+    ...(stored === undefined ? {} : { stored }),
   };
 }
 
@@ -141,15 +167,29 @@ export function formToPolicy(
     else rule.whole = true;
     rules.set(type, rule);
   }
-  const records = [...rules].map(([type, rule]) =>
+  const edited = [...rules].map(([type, rule]) =>
     rule.whole || rule.prefixes.length === 0
       ? { type }
       : { type, key_prefixes: rule.prefixes },
   );
+  // Lines that still read as the stored list give the stored list back, so an
+  // explicit empty list or an empty prefix list is not turned into no limit.
+  const stored = form.stored;
+  const keptTasks =
+    stored?.task_types !== undefined &&
+    sameLines(task_types, stored.task_types);
+  const keptRecords =
+    stored?.records !== undefined &&
+    sameLines(uniqueLines(form.records), recordLines(stored.records));
+  const records = keptRecords ? stored?.records : edited;
   const restrictions = {
-    ...(task_types.length ? { task_types } : {}),
+    ...(keptTasks
+      ? { task_types: stored?.task_types }
+      : task_types.length
+        ? { task_types }
+        : {}),
     ...(form.records_split ? form.records_split : {}),
-    ...(records.length ? { records } : {}),
+    ...(keptRecords || edited.length ? { records } : {}),
   };
   const parsed = CredentialPolicySchema.safeParse({
     role: form.role,
