@@ -216,7 +216,7 @@ export function registerRecordTools(
   registerPrimitiveTool(
     server,
     "tila_record_history",
-    "Get revision history for a record. Returns newest-first list of revisions with operation, timestamp, and actor.",
+    "Get revision history for a record. Returns newest-first list of revisions with operation, timestamp, and actor, plus the authoring principal_id and the signing token_id. Either is null when not recorded: principal_id for revisions written before it was tracked, token_id for browser or OIDC session writes.",
     {
       type: z.string().describe("Record type"),
       key: z.string().describe("Record key"),

@@ -1882,6 +1882,18 @@ export const RecordHistoryItemSchema = z.object({
   canonical_artifact_key: z.string().nullable(),
   source_artifact_key: z.string().nullable(),
   actor: z.string(),
+  /**
+   * Authenticated author of the revision. `null` for revisions written before
+   * project migration 43, which are never backfilled. Absent only from
+   * responses produced by an older Worker.
+   */
+  principal_id: z.string().nullable().optional(),
+  /**
+   * Credential that signed the write. `null` for browser/OIDC/workspace
+   * sessions and for revisions that stored none. Absent only from responses
+   * produced by an older Worker.
+   */
+  token_id: z.string().nullable().optional(),
   created_at: z.number().int(),
   message: z.string().nullable(),
   // Populated only when the history is requested with `includeValues=true`

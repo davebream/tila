@@ -216,3 +216,76 @@ describe("POST /record/:type/:key/put", () => {
     });
   });
 });
+
+describe("GET /record/:type/:key/history revision authors", () => {
+  type HistoryBody = {
+    ok: boolean;
+    items: {
+      revision: number;
+      actor: string;
+      principal_id: string | null;
+      token_id: string | null;
+    }[];
+  };
+
+  async function history(): Promise<HistoryBody> {
+    const res = await app.request("/record/config/main/history");
+    expect(res.status).toBe(200);
+    return (await res.json()) as HistoryBody;
+  }
+
+  it("returns the writer's principal and credential beside the unchanged actor", async () => {
+    const created = await put("config", "main", {
+      value: { n: 1 },
+      actor: "deploy-bot",
+      actor_token_id: "token-1",
+    });
+    expect(created.status).toBe(200);
+
+    const body = await history();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      revision: 1,
+      // `actor` stays the display name the Worker stamps; the new fields are
+      // the authenticated identity and credential.
+      actor: "deploy-bot",
+      principal_id: IDENTITY_BODY.principal_id,
+      token_id: "token-1",
+    });
+  });
+
+  it("keeps the principal when the credential rotates, with a different token_id", async () => {
+    await put("config", "main", { value: { n: 1 }, actor_token_id: "old" });
+    await put("config", "main", { value: { n: 2 }, actor_token_id: "new" });
+
+    const { items } = await history();
+    expect(items.map((i) => i.token_id)).toEqual(["new", "old"]);
+    expect(new Set(items.map((i) => i.principal_id))).toEqual(
+      new Set([IDENTITY_BODY.principal_id]),
+    );
+  });
+
+  it("reports a browser or OIDC session write with its principal and a null token", async () => {
+    // Session credentials have no D1 token row: the Worker sends no
+    // `actor_token_id` (or null) with the canonical identity.
+    await put("config", "main", { value: { n: 1 }, actor_token_id: null });
+    await put("config", "main", { value: { n: 2 } });
+
+    const { items } = await history();
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.principal_id).toBe(IDENTITY_BODY.principal_id);
+      expect(item.token_id).toBeNull();
+    }
+  });
+
+  it("returns null principal for a revision stored before the column existed", async () => {
+    await put("config", "main", { value: { n: 1 }, actor_token_id: "t" });
+    testDb.sqlite
+      .prepare("UPDATE record_revisions SET principal_id = NULL")
+      .run();
+
+    const { items } = await history();
+    expect(items[0]).toMatchObject({ principal_id: null, token_id: "t" });
+  });
+});
