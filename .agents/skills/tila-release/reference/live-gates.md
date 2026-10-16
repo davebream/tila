@@ -57,12 +57,16 @@ source $RD/vars.sh; sleep 10; curl -s $WORKER_URL/api/health | jq '{version, com
 
 ```bash
 mkdir -p $RD/proj && (cd $RD/proj && git init -q && \
-  TILA_HOME=$GATE_HOME bun --tsconfig-override $REPO/tsconfig.json $REPO/packages/cli/src/index.ts \
+  env -i HOME="$HOME" PATH="$PATH" TILA_HOME="$GATE_HOME" \
+  bun --tsconfig-override $REPO/tsconfig.json $REPO/packages/cli/src/index.ts \
   project create --name tila-bench-$(date +%Y%m%d) --skip-github --json) > $RD/project.json
 echo "PROJECT_ID=$(jq -r .result.project_id $RD/project.json)" >> $RD/vars.sh; source $RD/vars.sh
 ```
 
 `$RD/project.json` holds the full-scope project token at `.result.token`. Never print it.
+Run project creation and destruction with the clean environment shown here: inherited
+runtime-session variables otherwise select the current managed run instead of the
+disposable infrastructure-owner workflow.
 
 ## 4. Gate 1: DO restart persistence
 
@@ -114,7 +118,8 @@ TILA_HOME=$PREV_HOME bun --tsconfig-override $PREV/tsconfig.json $S/provision-ga
   --repo $PREV --slug ${SLUG}ab --d1 $SLUG-global --r2 $SLUG-artifacts > $RD/provision-prev.log 2>&1
 echo "PREV_URL=$(grep -h '"worker_url"' $RD/provision-prev.log | jq -r .worker_url)" >> $RD/vars.sh
 mkdir -p $RD/proj-prev && (cd $RD/proj-prev && git init -q && \
-  TILA_HOME=$PREV_HOME bun --tsconfig-override $PREV/tsconfig.json $PREV/packages/cli/src/index.ts \
+  env -i HOME="$HOME" PATH="$PATH" TILA_HOME="$PREV_HOME" \
+  bun --tsconfig-override $PREV/tsconfig.json $PREV/packages/cli/src/index.ts \
   project create --name tila-ab-$(date +%Y%m%d) --skip-github --json) > $RD/project-prev.json
 echo "PREV_ID=$(jq -r .result.project_id $RD/project-prev.json)" >> $RD/vars.sh; source $RD/vars.sh
 $S/run-gate-bench.sh ab "$PREV_URL" "$PREV_ID" $RD/project-prev.json "$WORKER_URL" "$PROJECT_ID" $RD/project.json $RD/ab
@@ -131,8 +136,8 @@ Wrocław) is a quick check that the network itself is fine.
 Destroy every gate project first, each with its own home and CLI:
 
 ```bash
-(cd $RD/proj && TILA_HOME=$GATE_HOME bun --tsconfig-override $REPO/tsconfig.json $REPO/packages/cli/src/index.ts project destroy --force --json)
-(cd $RD/proj-prev && TILA_HOME=$PREV_HOME bun --tsconfig-override $PREV/tsconfig.json $PREV/packages/cli/src/index.ts project destroy --force --json)   # A/B only
+(cd $RD/proj && env -i HOME="$HOME" PATH="$PATH" TILA_HOME="$GATE_HOME" bun --tsconfig-override $REPO/tsconfig.json $REPO/packages/cli/src/index.ts project destroy --force --json)
+(cd $RD/proj-prev && env -i HOME="$HOME" PATH="$PATH" TILA_HOME="$PREV_HOME" bun --tsconfig-override $PREV/tsconfig.json $PREV/packages/cli/src/index.ts project destroy --force --json)   # A/B only
 ```
 
 Expect `"stores":{"do":"ok","r2":"ok","d1":"ok","local":"ok"}` and `"failures":[]`. Then:
