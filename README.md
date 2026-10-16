@@ -9,7 +9,7 @@ Content-addressed artifacts and coordination protected by fencing tokens.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.10.0 — see the [published release](https://github.com/davebream/tila/releases/tag/v0.10.0). APIs may change before v1.0. Upgrade the deployment CLI to 0.10.0 before deploying; it verifies and preserves live Worker exposure and analytics settings and requires Wrangler 3.91.0 or newer. Deploy the Worker and bundled UI together before upgrading other clients. Read the [v0.10.0 upgrade notes](CHANGELOG.md#0100---2026-10-14) before deploying.
+> **Status:** v0.11.0 — APIs may change before v1.0. Upgrade the deployment CLI to 0.11.0, then deploy the Worker and bundled UI together before upgrading other clients or issuing split record policies. Read the [v0.11.0 upgrade notes](CHANGELOG.md#0110---2026-10-16) for migrations 43–45, checkpoint recovery and client behavior changes.
 
 </div>
 
@@ -17,7 +17,7 @@ tila is one development-management product with a reusable state-and-coordinatio
 core. The Cloudflare deployment holds shared project state; CLI, MCP, SDK, and web
 clients use its service contracts.
 
-**Delivered in v0.10.0:** schema-defined tasks and records, claims/fences, artifacts,
+**Delivered in v0.11.0:** schema-defined tasks and records, claims/fences, artifacts,
 journal cursors and handoffs, conversations, and a managed work queue with durable
 assignments, attempts, questions/decisions, and explicit results. An attempt is one
 execution of a task; its result is recorded separately from task and terminal state.
@@ -210,7 +210,7 @@ tila mcp init
 **2. Explicit managed launch** (after enrollment)
 ```sh
 tila --instance https://tila.example.com --project my-project machine enroll
-tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.10.0
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.11.0
 ```
 
 Remote MCP uses a managed project run through a local credential helper or a
