@@ -77,6 +77,9 @@ const {
   setWorkerSecrets,
 } = await lib("cloudflare-resources");
 const { deployWorkerWithAssets } = await lib("deploy");
+const { readWorkerSettings, resolveDeploymentSettings } = await lib(
+  "deployment-settings",
+);
 const { writeInfraConfig } = await lib("infra-config");
 const { generateHmacKey, resolveCfApiToken, resolveMigrationsDir } =
   await lib("provisioning");
@@ -95,6 +98,16 @@ const cf = createCloudflareClient(token);
 const account = (await cfApi("accounts")).result?.[0];
 if (!account?.id)
   throw new Error("No Cloudflare account visible to this token");
+
+// Verify the endpoint and preserve an existing gate Worker's settings before
+// creating storage. Only a confirmed missing Worker permits deployment defaults.
+const worker = await readWorkerSettings(cf, account.id, slug, true);
+const deployment = await resolveDeploymentSettings({
+  cf,
+  accountId: account.id,
+  scriptName: slug,
+  worker,
+});
 
 const existing = await cfApi(
   `accounts/${account.id}/d1/database?name=${encodeURIComponent(d1Name)}`,
@@ -127,6 +140,8 @@ const deployed = await deployWorkerWithAssets({
   r2BucketName: r2Name,
   apiToken: token,
   skipUi: false,
+  settings: deployment.settings,
+  workerUrl: deployment.workerUrl,
 });
 const hmac = generateHmacKey();
 const infraAdmin = randomBytes(32).toString("hex");
