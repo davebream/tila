@@ -578,3 +578,127 @@ describe("artifact download and bounds routes", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("plain artifact deletion", () => {
+  const key = "sources/fixture.bin";
+  const request = () =>
+    new Request(`https://worker/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
+
+  it("confirms only after R2 deletion completes and safely repeats deletion", async () => {
+    const fixture = buildTestApp(
+      Array.from({ length: 4 }, () => jsonResponse({ ok: true })),
+    );
+    const remove = vi.mocked(fixture.mockEnv.ARTIFACTS.delete);
+    remove.mockImplementation(async () => {
+      await Promise.resolve();
+      expect(fixture.capturedFetchCalls.at(-1)?.url).toContain(
+        "/artifact/tombstone",
+      );
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fixture.app.fetch(
+        request(),
+        fixture.mockEnv,
+        fixture.mockExecutionCtx,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(fixture.capturedFetchCalls.at(-1)).toEqual({
+        url: "https://do/artifact/confirm-blob-deleted",
+        body: { r2_key: key },
+      });
+    }
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledWith(key);
+    expect(
+      fixture.capturedFetchCalls.map(({ url }) => new URL(url).pathname),
+    ).toEqual([
+      "/artifact/tombstone",
+      "/artifact/confirm-blob-deleted",
+      "/artifact/tombstone",
+      "/artifact/confirm-blob-deleted",
+    ]);
+  });
+
+  it("does not delete or confirm when tombstoning fails", async () => {
+    const fixture = buildTestApp([jsonResponse({ ok: false }, 500)]);
+    const response = await fixture.app.fetch(
+      request(),
+      fixture.mockEnv,
+      fixture.mockExecutionCtx,
+    );
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: { code: "tombstone-failed" },
+    });
+    expect(fixture.mockEnv.ARTIFACTS.delete).not.toHaveBeenCalled();
+    expect(fixture.capturedFetchCalls).toHaveLength(1);
+  });
+
+  it("leaves R2 failures unconfirmed and confirms a successful retry", async () => {
+    const fixture = buildTestApp(
+      Array.from({ length: 3 }, () => jsonResponse({ ok: true })),
+    );
+    vi.mocked(fixture.mockEnv.ARTIFACTS.delete).mockRejectedValueOnce(
+      new Error("R2 unavailable"),
+    );
+    const failed = await fixture.app.fetch(
+      request(),
+      fixture.mockEnv,
+      fixture.mockExecutionCtx,
+    );
+    expect(failed.status).toBe(200);
+    expect(await failed.json()).toEqual({ ok: true, r2_orphaned: true });
+    expect(fixture.capturedFetchCalls).toHaveLength(1);
+
+    const retried = await fixture.app.fetch(
+      request(),
+      fixture.mockEnv,
+      fixture.mockExecutionCtx,
+    );
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual({ ok: true });
+    expect(fixture.capturedFetchCalls.at(-1)?.url).toBe(
+      "https://do/artifact/confirm-blob-deleted",
+    );
+  });
+
+  it.each(["http", "transport"])(
+    "returns a retryable error on %s confirmation failure and recovers",
+    async (failure) => {
+      const fixture = buildTestApp([
+        jsonResponse({ ok: true }),
+        failure === "http"
+          ? jsonResponse({ ok: false }, 503)
+          : new Error("DO unavailable"),
+        jsonResponse({ ok: true }),
+        jsonResponse({ ok: true }),
+      ]);
+      const failed = await fixture.app.fetch(
+        request(),
+        fixture.mockEnv,
+        fixture.mockExecutionCtx,
+      );
+      expect(failed.status).toBe(502);
+      expect(await failed.json()).toMatchObject({
+        ok: false,
+        error: { code: "blob-delete-confirmation-failed", retryable: true },
+      });
+      expect(fixture.mockEnv.ARTIFACTS.delete).toHaveBeenCalledTimes(1);
+
+      const retried = await fixture.app.fetch(
+        request(),
+        fixture.mockEnv,
+        fixture.mockExecutionCtx,
+      );
+      expect(retried.status).toBe(200);
+      expect(await retried.json()).toEqual({ ok: true });
+      expect(fixture.mockEnv.ARTIFACTS.delete).toHaveBeenCalledTimes(2);
+      expect(fixture.capturedFetchCalls.at(-1)?.url).toBe(
+        "https://do/artifact/confirm-blob-deleted",
+      );
+    },
+  );
+});
