@@ -1,278 +1,356 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { TILA_ERRORS, toTilaErrorCode } from "../../sdk/src/error-codes";
 
-/** Recursively collect all .ts files (excluding .test.ts) under a directory. */
+const PACKAGES = join(import.meta.dirname, "../..");
+
+// These modules' `code` fields are not top-level HTTP error codes. Exclude
+// occurrences by source, never by value: e.g. schema-corrupt is also emitted
+// publicly by error-map.ts, and permission-denied has many public producers.
+const INTERNAL_CODE_SOURCES = new Map([
+  [
+    "worker/src/middleware/dpop.ts",
+    "auth.ts wraps rejection details in dpop-invalid",
+  ],
+  [
+    "ops-sqlite/src/ready-ops.ts",
+    "successful readiness responses contain reasons",
+  ],
+  ["core/src/definition-transfer.ts", "nested definition import diagnostics"],
+  ["core/src/definition-yaml.ts", "nested YAML import diagnostics"],
+  [
+    "core/src/settings-transfer.ts",
+    "client-side settings validation and planning",
+  ],
+  ["core/src/settings-execution.ts", "client-side settings execution receipts"],
+  [
+    "core/src/schema-document.ts",
+    "local schema parsing diagnostics; HTTP mapping is in error-map.ts",
+  ],
+]);
+
+// Constructor code argument positions for families forwarded unchanged by
+// mapProjectError or Worker route/auth handlers. Internal errors such as
+// OidcDiscoveryError are deliberately absent: they are translated at the edge.
+const FORWARDED_ERRORS: Record<string, number | null> = {
+  AgentBindingError: 0,
+  ArtifactReviewError: 1,
+  ArtifactVersionError: 1,
+  ContinuityError: 0,
+  ConversationError: 0,
+  JournalReportError: 0,
+  OidcVerificationError: 0,
+  QuestionError: 0,
+  QueueError: 0,
+  RuntimeDenied: 0,
+  SchemaPreconditionError: 0,
+  TemplateInstantiateError: 0,
+  // These two use fixed code properties, not constructor arguments.
+  ProjectMaintenanceError: null,
+  TransferConflictError: null,
+};
+
 function collectSourceFiles(dir: string): string[] {
-  const results: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      results.push(...collectSourceFiles(full));
-    } else if (full.endsWith(".ts") && !full.endsWith(".test.ts")) {
-      results.push(full);
-    }
-  }
-  return results;
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const file = join(dir, entry.name);
+    if (entry.isDirectory()) return collectSourceFiles(file);
+    return file.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(file)
+      ? [file]
+      : [];
+  });
 }
 
-/** Collect error.code string literals from a source file's content. */
-function collectEmittedCodesFromContent(content: string): string[] {
-  const codes: string[] = [];
-  const patterns = [
-    // Shared agent-binding operations use the typed fail helper.
-    /fail\(\s*"([a-z][a-z0-9-]*)"/g,
-    /OidcVerificationError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /RuntimeDenied\(\s*"([a-z][a-z0-9-]*)"/g,
-    /this\.deny\(\s*"([a-z][a-z0-9-]*)"/g,
-    /ConversationError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /ContinuityError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /JournalReportError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /QueueError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /QuestionError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /SchemaPreconditionError\(\s*"([a-z][a-z0-9-]*)"/g,
-    /ArtifactVersionError\(\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
-    /code:\s*"([a-z][a-z0-9-]*)"/g,
-    /zodValidationError\([^)]*?"([a-z][a-z0-9-]*)"/g,
-    /jsonError\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
-    // Route-local `failure(c, status, "code", ...)` helpers (repos.ts).
-    /failure\(\s*c\s*,\s*\d+\s*,\s*"([a-z][a-z0-9-]*)"/g,
-    // multiline jsonError(c,\n  409,\n  "already-held", ...)
-    /jsonError\(\s*\n\s*c\s*,\s*\n\s*\d+\s*,\s*\n\s*"([a-z][a-z0-9-]*)"/g,
+/** Bounded syntax inspection, not a general interprocedural data-flow engine. */
+function collectEmittedCodes(content: string, file: string): Set<string> {
+  if (INTERNAL_CODE_SOURCES.has(file)) return new Set();
+  const source = ts.createSourceFile(
+    file,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const codes = new Set<string>();
+  const aliases = new Map<string, ts.TypeNode>();
+  const constants = new Map<string, ts.Expression>();
+  for (const statement of source.statements) {
+    if (ts.isTypeAliasDeclaration(statement))
+      aliases.set(statement.name.text, statement.type);
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer)
+          constants.set(declaration.name.text, declaration.initializer);
+      }
+    }
+  }
+  function literals(
+    node: ts.Node | undefined,
+    seen = new Set<ts.Node>(),
+  ): void {
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    if (ts.isStringLiteralLike(node)) codes.add(node.text);
+    else if (ts.isConditionalExpression(node)) {
+      literals(node.whenTrue, seen);
+      literals(node.whenFalse, seen);
+    } else if (
+      ts.isBinaryExpression(node) &&
+      [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(
+        node.operatorToken.kind,
+      )
+    ) {
+      literals(node.left, seen);
+      literals(node.right, seen);
+    } else if (
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isParenthesizedExpression(node)
+    ) {
+      literals(node.expression, seen);
+    } else if (ts.isLiteralTypeNode(node)) literals(node.literal, seen);
+    else if (ts.isUnionTypeNode(node)) {
+      for (const type of node.types) literals(type, seen);
+    } else if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName))
+      literals(aliases.get(node.typeName.text), seen);
+    else if (ts.isIdentifier(node)) literals(constants.get(node.text), seen);
+  }
+  function name(node: ts.Node | undefined): string | undefined {
+    return node && (ts.isIdentifier(node) || ts.isStringLiteralLike(node))
+      ? node.text
+      : undefined;
+  }
+  function visit(node: ts.Node): void {
+    if (ts.isPropertyAssignment(node) && name(node.name) === "code")
+      literals(node.initializer);
+    if (
+      ts.isClassDeclaration(node) &&
+      node.name &&
+      node.name.text in FORWARDED_ERRORS
+    ) {
+      for (const member of node.members) {
+        if (ts.isPropertyDeclaration(member) && name(member.name) === "code") {
+          literals(member.initializer);
+          literals(member.type);
+        }
+        if (ts.isConstructorDeclaration(member)) {
+          const index = FORWARDED_ERRORS[node.name.text];
+          const parameter =
+            index === null ? undefined : member.parameters[index];
+          if (parameter) {
+            literals(parameter.type);
+            literals(parameter.initializer);
+          }
+        }
+      }
+    }
+    if (ts.isNewExpression(node)) {
+      const errorClass = ts.isPropertyAccessExpression(node.expression)
+        ? node.expression.name.text
+        : name(node.expression);
+      if (errorClass && errorClass in FORWARDED_ERRORS) {
+        const index = FORWARDED_ERRORS[errorClass];
+        if (index !== null) literals(node.arguments?.[index]);
+      }
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(source);
+      // DO jsonError normally takes (context, status, code, message); the
+      // transfer router's local helper takes (context, code, message, status).
+      if (callee === "jsonError")
+        literals(
+          node.arguments[
+            file === "worker/src/do/routes/transfer-routes.ts" ? 1 : 2
+          ],
+        );
+      if (callee === "errorEnvelope") literals(node.arguments[0]);
+      if (callee === "zodValidationError") literals(node.arguments[2]);
+      if (callee === "failure" && file === "worker/src/routes/repos.ts")
+        literals(node.arguments[2]);
+      if (
+        callee === "fail" &&
+        [
+          "ops-sqlite/src/agent-binding-ops.ts",
+          "ops-sqlite/src/conversation-ops.ts",
+        ].includes(file)
+      )
+        literals(node.arguments[0]);
+      if (callee === "this.deny" && file === "worker/src/d1/runtime-store.ts")
+        literals(node.arguments[0]);
+    }
+    // The validation helper's default is forwarded through a shorthand code.
+    if (
+      ts.isParameter(node) &&
+      name(node.name) === "code" &&
+      file === "worker/src/lib/validation.ts"
+    )
+      literals(node.initializer);
+    ts.forEachChild(node, visit);
+  }
+  // The journal route forwards this helper's return value. Inspect only its
+  // declared wire contract: other schema fields are nested Zod diagnostics.
+  if (file === "schemas/src/custom-journal.ts") {
+    for (const statement of source.statements) {
+      if (
+        ts.isFunctionDeclaration(statement) &&
+        statement.name?.text === "journalValidationCode"
+      )
+        literals(statement.type);
+    }
+  } else visit(source);
+  return codes;
+}
+
+function collectServerEmittedCodes(): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  const files = [
+    ...["worker", "ops-sqlite", "core"].flatMap((pkg) =>
+      collectSourceFiles(join(PACKAGES, pkg, "src")),
+    ),
+    join(PACKAGES, "schemas/src/custom-journal.ts"),
   ];
-
-  for (const re of patterns) {
-    for (const m of content.matchAll(re)) {
-      codes.push(m[1]);
-    }
+  for (const path of files) {
+    const file = relative(PACKAGES, path).replaceAll("\\", "/");
+    for (const code of collectEmittedCodes(readFileSync(path, "utf8"), file))
+      result.set(code, [...(result.get(code) ?? []), file]);
   }
-
-  return codes;
+  return result;
 }
 
-/** Collect error.code string literals emitted under a source directory. */
-function collectWorkerEmittedCodes(dir: string): Set<string> {
-  const codes = new Set<string>();
-
-  for (const file of collectSourceFiles(dir)) {
-    const content = readFileSync(file, "utf-8");
-    for (const code of collectEmittedCodesFromContent(content)) {
-      codes.add(code);
-    }
-  }
-
-  return codes;
-}
-
-const WORKER_SRC_DIR = join(__dirname, "../../worker/src");
-const OPS_SQLITE_SRC_DIR = join(__dirname, "../../ops-sqlite/src");
-const CORE_SRC_DIR = join(__dirname, "../../core/src");
-
-/** Collect error.code literals from server packages that emit HTTP errors. */
-function collectServerEmittedCodes(): Set<string> {
-  const codes = new Set<string>();
-  for (const dir of [WORKER_SRC_DIR, OPS_SQLITE_SRC_DIR, CORE_SRC_DIR]) {
-    for (const code of collectWorkerEmittedCodes(dir)) {
-      codes.add(code);
-    }
-  }
-  return codes;
-}
-
-/** SDK-generated codes — not emitted by the worker HTTP layer. */
-const SDK_LOCAL_WIRE_CODES = new Set<string>([
+const SDK_LOCAL_CODES = new Set<string>([
   TILA_ERRORS.UNKNOWN,
   TILA_ERRORS.UNSUPPORTED_CAPABILITY,
   TILA_ERRORS.ARTIFACT_GET_FAILED,
   TILA_ERRORS.ARTIFACT_GET_LATEST_FAILED,
 ]);
 
-describe("TILA_ERRORS server-emitted code reconciliation (#114, #117)", () => {
-  const SDK_ONLY_ERROR_CODES = new Set<string>([
-    "unsupported-capability",
-    "artifact-get-failed",
-    "artifact-get-latest-failed",
-    "UNKNOWN",
-  ]);
+// Keep these tests independent of TILA_ERRORS: deleting a server code from the
+// SDK must fail even when no individual endpoint regression exercises it.
+describe("SDK / server error-code contract (#592)", () => {
+  const server = collectServerEmittedCodes();
+  const sdk = new Set<string>(Object.values(TILA_ERRORS));
 
-  const SERVER_EMITTED_TILA_ERROR_CODES = new Set<string>([
-    "schema-destructive",
-    "schema-revision-required",
-    "question-not-found",
-    "question-conflict",
-    "question-invalid-state",
-    "question-correlation-conflict",
-    "question-idempotency-conflict",
-    "question-precondition",
-    "queue-managed-work",
-    "queue-not-found",
-    "queue-conflict",
-    "queue-authority-lost",
-    "queue-precondition",
-    "queue-invalid-state",
-    "queue-idempotency-conflict",
-    "schema-revision-conflict",
-    "schema-review-required",
-    "schema-review-mismatch",
-    "unsupported-protocol",
-    "cursor-expired",
-    "delivery-expired",
-    "body-too-large",
-    "payload-too-large",
-    "stale-binding",
-    "no-active-binding",
-    "runtime-required",
-    "profile-mismatch",
-    "runtime-purpose-denied",
-    "runtime-binding-mismatch",
-    "runtime-proof-replayed",
-    "runtime-policy-denied",
-    "runtime-renewal-conflict",
-    "runtime-conflict",
-    "runtime-authorization-unavailable",
-    "enrollment-revoked",
-    "run-closed",
-    "run-expired",
-    "invitation-invalid",
-    "workload-revoked",
-    "workload-already-exchanged",
-    "auth-unavailable",
-    "config-unavailable",
-    "oidc-not-configured",
-    "issuer-discovery-failed",
-    "oidc-invalid-token",
-    "oidc-invalid-issuer",
-    "oidc-invalid-audience",
-    "oidc-token-expired",
-    "oidc-signature-invalid",
-    "oidc-jwks-unavailable",
-    "principal-not-allowed",
-
-    "journal-history-unavailable",
-    "journal-history-conflict",
-    "report-correction-denied",
-    "handoff-not-found",
-    "handoff-conflict",
-    "artifact-unavailable",
-    "artifact-lineage-busy",
-    "lineage-conflict",
-    "artifact-operation-aborted",
-    "invalid-cursor",
-    "artifact-storage-unavailable",
-    "unauthorized",
-    "session-expired",
-    "rate-limited",
-    "permission-denied",
-    "project-mismatch",
-    "csrf-missing-origin",
-    "csrf-origin-mismatch",
-    "do-unreachable",
-    "repo-not-allowed",
-    "access-policy-invalid",
-    "oidc-policy-denied",
-    "github-auth-failed",
-    "hmac-not-configured",
-    "session-revoked",
-    "subject-revoked",
-    "token-name-conflict",
-    "token-not-found",
-    "stale-fence",
-    "not-found",
-    "gate-already-settled",
-    "no-fence",
-    "gate-fence-conflict",
-    "internal",
-    "constraint-violation",
-    "idempotency-key-conflict",
-    "validation-error",
-    "already-held",
-    "renew-failed",
-    "release-ownership-denied",
-    "bad-request",
-    "missing-query",
-    "invalid-query",
-    "invalid-slot",
-    "invalid-relationship-type",
-    "token-authz-denied",
-    "repo-access-denied",
-    "repo-not-found",
-    "github-api-timeout",
-    "github-api-error",
-    "instance-mismatch",
-    "permission-revoked",
-    "dpop-required",
-    "dpop-invalid",
-    "participant-required",
-    "invalid-environment",
-    "forbidden",
-    "signal-group-not-found",
-    "no-active-recipients",
-    "signal-expired",
-    "revision-conflict",
-    "agent-archived",
-    "room-archived",
-  ]);
-
-  it('contains no value equal to the orphan "TOKEN_AUTHZ_DENIED"', () => {
-    expect(Object.values(TILA_ERRORS)).not.toContain("TOKEN_AUTHZ_DENIED");
-  });
-
-  it('maps "token-authz-denied" from exactly one key (REPO_TOKEN_AUTHZ_DENIED)', () => {
-    const hits = Object.entries(TILA_ERRORS).filter(
-      ([, value]) => value === "token-authz-denied",
-    );
-    expect(hits).toEqual([["REPO_TOKEN_AUTHZ_DENIED", "token-authz-denied"]]);
-  });
-
-  it("maps every non-SDK-only value to a server-emitted wire code", () => {
-    const unmappedServerCodes = Object.entries(TILA_ERRORS).filter(
-      ([, value]) =>
-        !SDK_ONLY_ERROR_CODES.has(value) &&
-        !SERVER_EMITTED_TILA_ERROR_CODES.has(value),
-    );
-
+  it("recognizes every public server code without UNKNOWN normalization", () => {
+    const missing = [...server].filter(([code]) => !sdk.has(code));
     expect(
-      unmappedServerCodes,
-      `TILA_ERRORS values not present in server emission set: ${JSON.stringify(
-        unmappedServerCodes,
-      )}`,
+      missing,
+      "Server codes missing from the SDK, with source files",
+    ).toEqual([]);
+    for (const code of server.keys()) expect(toTilaErrorCode(code)).toBe(code);
+  });
+
+  it("has a server source for every non-local SDK code", () => {
+    expect(
+      [...sdk].filter(
+        (code) => !SDK_LOCAL_CODES.has(code) && !server.has(code),
+      ),
     ).toEqual([]);
   });
 
-  it("has no two keys mapping to the same wire value", () => {
-    const values = Object.values(TILA_ERRORS);
-    const seen = new Map<string, string[]>();
-    for (const [key, value] of Object.entries(TILA_ERRORS)) {
-      const keys = seen.get(value) ?? [];
-      keys.push(key);
-      seen.set(value, keys);
-    }
-    const duplicates = [...seen.entries()].filter(
-      ([, keys]) => keys.length > 1,
-    );
+  it("has unique wire values and retains the repository authorization constant", () => {
+    expect(Object.values(TILA_ERRORS)).toHaveLength(sdk.size);
     expect(
-      duplicates,
-      `Duplicate TILA_ERRORS wire values: ${JSON.stringify(duplicates)}`,
-    ).toEqual([]);
-    expect(values.length).toBe(new Set(values).size);
+      Object.entries(TILA_ERRORS).filter(
+        ([, code]) => code === "token-authz-denied",
+      ),
+    ).toEqual([["REPO_TOKEN_AUTHZ_DENIED", "token-authz-denied"]]);
   });
 
-  it("every map value is emitted by the worker or is SDK-local (#117)", () => {
-    const workerCodes = collectServerEmittedCodes();
-    const unmapped: string[] = [];
+  it("retains UNKNOWN for genuinely future codes", () => {
+    expect(toTilaErrorCode("some-future-code")).toBe(TILA_ERRORS.UNKNOWN);
+  });
+});
 
-    for (const value of Object.values(TILA_ERRORS)) {
-      if (SDK_LOCAL_WIRE_CODES.has(value)) continue;
-      if (!workerCodes.has(value)) {
-        unmapped.push(value);
-      }
-    }
+describe("server error-code collector", () => {
+  it("reads the journal validation contract without including nested Zod codes", () => {
+    expect([
+      ...collectEmittedCodes(
+        `const issue = { code: "custom" };
+         function journalValidationCode(error: unknown): "payload-too-large" | "validation-error" { return "validation-error"; }`,
+        "schemas/src/custom-journal.ts",
+      ),
+    ]).toEqual(["payload-too-large", "validation-error"]);
+  });
+  it("reads literals, constants, conditionals and defaults without matching comments or messages", () => {
+    const codes = collectEmittedCodes(
+      `
+      // code: "comment-only"
+      const fallback = "default-code";
+      const a = { error: { code: disabled ? "disabled" : (other ?? fallback), message: "code: ignored" } };
+      const b = { error: { "code": "DO_DESTROY_FAILED" as const } };
+    `,
+      "worker/src/routes/example.ts",
+    );
+    expect([...codes].sort()).toEqual([
+      "DO_DESTROY_FAILED",
+      "default-code",
+      "disabled",
+    ]);
+  });
 
+  it("reads the two jsonError signatures and source-scoped helpers", () => {
+    expect([
+      ...collectEmittedCodes(
+        'jsonError(c, 409, "conflict", "Message")',
+        "worker/src/do/routes/record-routes.ts",
+      ),
+    ]).toEqual(["conflict"]);
+    expect([
+      ...collectEmittedCodes(
+        'jsonError(c, "transfer-conflict", "Message", 409)',
+        "worker/src/do/routes/transfer-routes.ts",
+      ),
+    ]).toEqual(["transfer-conflict"]);
+    expect([
+      ...collectEmittedCodes(
+        'fail("conflict", "Message")',
+        "ops-sqlite/src/agent-binding-ops.ts",
+      ),
+    ]).toEqual(["conflict"]);
+    expect([
+      ...collectEmittedCodes(
+        'fail("internal", "Message")',
+        "core/src/other.ts",
+      ),
+    ]).toEqual([]);
+  });
+
+  it("reads forwarded constructors, fixed properties and literal-union declarations", () => {
     expect(
-      unmapped,
-      `TILA_ERRORS values not found in worker emission scan: ${unmapped.join(", ")}`,
-    ).toEqual([]);
+      [
+        ...collectEmittedCodes(
+          `
+      type Codes = "invalid-id" | "no-schema";
+      class TemplateInstantiateError extends Error { constructor(public code: Codes) { super(); } }
+      class TransferConflictError extends Error { readonly code = "transfer-conflict"; }
+      new ArtifactReviewError(409, "review-conflict", "Message");
+      new TransferConflictError("Do not interpret this message as a code");
+      new OidcDiscoveryError("discovery-invalid", "Internal detail");
+    `,
+          "ops-sqlite/src/example.ts",
+        ),
+      ].sort(),
+    ).toEqual([
+      "invalid-id",
+      "no-schema",
+      "review-conflict",
+      "transfer-conflict",
+    ]);
+  });
+
+  it("excludes internal occurrences without suppressing public occurrences of the same value", () => {
+    for (const file of INTERNAL_CODE_SOURCES.keys())
+      expect([
+        ...collectEmittedCodes(
+          'const diagnostic = { code: "schema-corrupt" };',
+          file,
+        ),
+      ]).toEqual([]);
+    expect([
+      ...collectEmittedCodes(
+        'const response = { error: { code: "schema-corrupt" } };',
+        "ops-sqlite/src/error-map.ts",
+      ),
+    ]).toEqual(["schema-corrupt"]);
   });
 });
