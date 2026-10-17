@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-17
+
+### Upgrade notes
+
+- No migrations, no new capabilities and no API or response shape changes. Upgrade the CLI and SDK; deploying the Worker is optional because every change is client-side.
+- `archive_bytes` in backup metadata now reports the size of the completed archive file. It used to report the payload bytes stored inside the archive for new exports, while import and inspect results reported file sizes, so the two disagreed. The value is written into new local and cloud manifests. Older archives are not rewritten: inspecting or importing one reports its measured file size. `tila project export`, `tila project import` and the inspect output label the number `Archive bytes`.
+
+### Fixes
+
+- Cloud imports of current project backups no longer fail with HTTP 400 (`sessionId is required`) (#586). The compatibility check asked for export-session metadata before a transfer had opened. It now reads the authorized backup capabilities endpoint once and checks both required features from its migration version before the safety export or replacement runs.
+- Backup archive sizes agree between export, inspect and import (#587, see Upgrade notes).
+- The CLI shows informational diagnostics in the right colour again (#585). Bun colours `console.error` output red, and the shared prompt wrapper used it for every severity, so passing `tila doctor` checks and successful deployments looked like errors. Doctor prints a success summary when every check passes, and deployment target details use a styled note. JSON output, redirected output, CI and `NO_COLOR` keep plain output and their existing streams.
+
 ## [0.11.0] - 2026-10-16
 
 ### Upgrade notes
@@ -535,7 +548,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/davebream/tila/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/davebream/tila/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/davebream/tila/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/davebream/tila/compare/v0.8.0...v0.9.0
