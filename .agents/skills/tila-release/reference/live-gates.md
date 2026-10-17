@@ -125,7 +125,10 @@ echo "PREV_ID=$(jq -r .result.project_id $RD/project-prev.json)" >> $RD/vars.sh;
 $S/run-gate-bench.sh ab "$PREV_URL" "$PREV_ID" $RD/project-prev.json "$WORKER_URL" "$PROJECT_ID" $RD/project.json $RD/ab
 ```
 
-The script prints p95 per run in order A (previous), B (release), A, B. If both sides
+The script stops on the first failed child command and preserves its exit status.
+It prints primary-operation p50/p95 (`acquire` for claims and `update` for fenced
+writes), not a server timing component. Round 1 runs A (previous), B (release);
+round 2 reverses to B, A to reduce time-order bias. If both sides
 are equally slow, the cause is the environment: put the table in BASELINE.md. If B is
 consistently slower, stop and report a likely code regression to the user.
 `curl -s -o /dev/null -w '%{time_total}\n' $WORKER_URL/api/health` (~60 ms from

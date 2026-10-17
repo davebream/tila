@@ -109,8 +109,9 @@ pnpm install --lockfile-only             # workspace versions in pnpm-lock.yaml
 ./node_modules/.bin/biome check --write $(git diff --name-only -- '*.json')
 pnpm version:check
 ```
-Then write the CHANGELOG section, its compare links and the README status line from the
-reviewed draft (`reference/changelog-and-pr.md`).
+Then write the CHANGELOG section, its compare links and the README status and current
+delivery labels from the reviewed draft (`reference/changelog-and-pr.md`). Run
+`node --test scripts/version-docs.test.mjs` before committing to catch stale labels.
 
 Check: `git diff --stat` touches only package JSON files, `server.json`,
 `pnpm-lock.yaml`, `homebrew/Formula/tila.rb`, `CHANGELOG.md` and `README.md`, and the
