@@ -17,7 +17,7 @@ tila is one development-management product with a reusable state-and-coordinatio
 core. The Cloudflare deployment holds shared project state; CLI, MCP, SDK, and web
 clients use its service contracts.
 
-**Delivered as of v0.12.0:** schema-defined tasks and records, claims/fences, artifacts,
+**Delivered as of v0.12.1:** schema-defined tasks and records, claims/fences, artifacts,
 journal cursors and handoffs, conversations, and a managed work queue with durable
 assignments, attempts, questions/decisions, and explicit results. An attempt is one
 execution of a task; its result is recorded separately from task and terminal state.
