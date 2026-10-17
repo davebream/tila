@@ -1277,6 +1277,38 @@ artifacts.delete("/:key{.+$}", requirePermission("write"), async (c) => {
     return c.json({ ok: true, r2_orphaned: true });
   }
 
+  // Step 3: Record the missing blob before acknowledging complete deletion.
+  // Backups retain the tombstone and use this confirmation to skip its bytes.
+  try {
+    const confirmation = await forwardToDO(
+      stub,
+      "/artifact/confirm-blob-deleted",
+      "POST",
+      { r2_key: key },
+      undefined,
+      analyticsCtxFrom(c),
+    );
+    if (!confirmation.ok) {
+      throw new Error(`Backend confirmation returned ${confirmation.status}`);
+    }
+  } catch (err) {
+    console.error(
+      `[delete] Blob deletion confirmation failed for ${key}:`,
+      err,
+    );
+    return c.json(
+      {
+        ok: false,
+        error: {
+          code: "blob-delete-confirmation-failed",
+          message: "Blob deletion could not be confirmed; retry the deletion",
+          retryable: true,
+        },
+      },
+      502,
+    );
+  }
+
   return c.json({ ok: true });
 });
 

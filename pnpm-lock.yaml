@@ -370,6 +370,9 @@ importers:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
+      '@types/tar-stream':
+        specifier: ^3.1.5
+        version: 3.1.5
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -385,6 +388,9 @@ importers:
       smol-toml:
         specifier: 1.9.1
         version: 1.9.1
+      tar-stream:
+        specifier: ^3.2.2
+        version: 3.2.2
       tila-cli:
         specifier: workspace:*
         version: link:../cli
