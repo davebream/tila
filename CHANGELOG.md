@@ -11,13 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
-- No migrations, no new capabilities and no API or response shape changes. Upgrade the CLI and SDK; deploying the Worker is optional because every change is client-side.
-- `archive_bytes` in backup metadata now reports the size of the completed archive file. It used to report the payload bytes stored inside the archive for new exports, while import and inspect results reported file sizes, so the two disagreed. The value is written into new local and cloud manifests. Older archives are not rewritten: inspecting or importing one reports its measured file size. `tila project export`, `tila project import` and the inspect output label the number `Archive bytes`.
+- No migrations, no new capabilities and no API or response shape changes, and nothing in the Worker changed. If you already run a 0.11.0 Worker (it already serves the backup capabilities endpoint the import fix reads), upgrading the CLI and SDK is enough. If you are coming from 0.10.x or earlier, follow the 0.11.0 notes first: deploy the Worker and its bundled UI, which applies migrations 43–45, before upgrading clients.
+- `stats.archive_bytes` in a backup's `manifest.json` (also shown in `tila project export` and `tila project import` output, and in SDK export, inspect and import results) now reports the size of the completed archive file. New exports used to store the payload bytes inside the archive while import and inspect results reported file sizes, so the numbers disagreed. The new value is written into new local and cloud manifests. Anything that reads the stored value from a new manifest will see a slightly larger number than before. Older archives are not rewritten: inspecting or importing one reports its measured file size. `tila project export`, `tila project import` and the inspect output label the number `Archive bytes`.
 
 ### Fixes
 
-- Cloud imports of current project backups no longer fail with HTTP 400 (`sessionId is required`) (#586). The compatibility check asked for export-session metadata before a transfer had opened. It now reads the authorized backup capabilities endpoint once and checks both required features from its migration version before the safety export or replacement runs.
-- Backup archive sizes agree between export, inspect and import (#587, see Upgrade notes).
+- Backup export, inspect and import now report the same archive size (#587, see Upgrade notes).
+- Cloud imports of current project backups no longer fail with HTTP 400 (`sessionId is required`) (#586). The compatibility check asked for export-session metadata before a transfer had opened. It now reads the Worker's authorized backup capabilities endpoint (it lists the destination's migration level and supported backup features) once, and checks every feature the archive requires against that level before the safety export (the automatic backup taken before an import replaces a project) or the replacement runs.
 - The CLI shows informational diagnostics in the right colour again (#585). Bun colours `console.error` output red, and the shared prompt wrapper used it for every severity, so passing `tila doctor` checks and successful deployments looked like errors. Doctor prints a success summary when every check passes, and deployment target details use a styled note. JSON output, redirected output, CI and `NO_COLOR` keep plain output and their existing streams.
 
 ## [0.11.0] - 2026-10-16
