@@ -9,7 +9,7 @@ Content-addressed artifacts and coordination protected by fencing tokens.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.11.0 — APIs may change before v1.0. Upgrade the deployment CLI to 0.11.0, then deploy the Worker and bundled UI together before upgrading other clients or issuing split record policies. Read the [v0.11.0 upgrade notes](CHANGELOG.md#0110---2026-10-16) for migrations 43–45, checkpoint recovery and client behavior changes.
+> **Status:** v0.11.1 — APIs may change before v1.0. Patch release: no migrations or API changes, so upgrading the CLI and SDK is enough. If you are coming from 0.10.x or earlier, upgrade the deployment CLI to 0.11.x, then deploy the Worker and bundled UI together before upgrading other clients or issuing split record policies. Read the [0.11.0 upgrade notes](CHANGELOG.md#0110---2026-10-16) for migrations 43–45, checkpoint recovery and client behavior changes, and the [v0.11.1 notes](CHANGELOG.md#0111---2026-10-17) for the backup size fix.
 
 </div>
 
@@ -17,7 +17,7 @@ tila is one development-management product with a reusable state-and-coordinatio
 core. The Cloudflare deployment holds shared project state; CLI, MCP, SDK, and web
 clients use its service contracts.
 
-**Delivered in v0.11.0:** schema-defined tasks and records, claims/fences, artifacts,
+**Delivered as of v0.11.1:** schema-defined tasks and records, claims/fences, artifacts,
 journal cursors and handoffs, conversations, and a managed work queue with durable
 assignments, attempts, questions/decisions, and explicit results. An attempt is one
 execution of a task; its result is recorded separately from task and terminal state.
@@ -210,7 +210,7 @@ tila mcp init
 **2. Explicit managed launch** (after enrollment)
 ```sh
 tila --instance https://tila.example.com --project my-project machine enroll
-tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.11.0
+tila --instance https://tila.example.com --project my-project run exec -- npx -y tila-mcp-server@0.11.1
 ```
 
 Remote MCP uses a managed project run through a local credential helper or a
