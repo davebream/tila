@@ -23,6 +23,7 @@ vi.stubGlobal("fetch", mockFetch);
 // Mock ../../lib/prompts
 const mockNote = vi.fn();
 const mockLogInfo = vi.fn();
+const mockLogSuccess = vi.fn();
 const mockLogWarn = vi.fn();
 const mockLogError = vi.fn();
 const mockCancel = vi.fn();
@@ -32,6 +33,7 @@ vi.mock("../../lib/prompts", () => ({
   cancel: (...args: unknown[]) => mockCancel(...args),
   log: {
     info: (...args: unknown[]) => mockLogInfo(...args),
+    success: (...args: unknown[]) => mockLogSuccess(...args),
     warn: (...args: unknown[]) => mockLogWarn(...args),
     error: (...args: unknown[]) => mockLogError(...args),
   },
@@ -253,6 +255,28 @@ describe("doctor GitHub App checks", () => {
     const output = await runDoctor(ctx);
     expect(output).not.toContain("GitHub App");
     expect(output).toContain("DO schema ok");
+  });
+
+  it("renders an entirely healthy result as success", async () => {
+    mockDocResolveInstanceContext.mockResolvedValueOnce({
+      ok: true,
+      instance: {
+        instance_key: "test-instance",
+        worker_url: "https://test.workers.dev",
+        credentialSource: "test",
+        trust: { kind: "trusted" },
+      },
+      trace: [{ rung: "explicit-instance", matched: true }],
+    });
+
+    await runDoctor(contextWithSchemaDiagnostic());
+
+    expect(mockLogSuccess).toHaveBeenCalledWith(
+      expect.stringMatching(/^\d+ passed$/),
+    );
+    expect(mockLogInfo).not.toHaveBeenCalled();
+    expect(mockLogWarn).not.toHaveBeenCalled();
+    expect(mockLogError).not.toHaveBeenCalled();
   });
 
   it("accepts current claims without retired identity columns", async () => {

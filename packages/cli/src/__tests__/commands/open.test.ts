@@ -32,7 +32,7 @@ describe("tila open", () => {
     human.get.mockResolvedValue(null);
     vi.resetModules();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     vi.spyOn(process, "exit").mockImplementation(
       (_code: string | number | null | undefined) => {
         throw new Error(`process.exit(${_code})`);

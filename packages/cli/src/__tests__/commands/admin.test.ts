@@ -109,7 +109,7 @@ describe("tila admin — REMOTE_ONLY guard", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
@@ -157,7 +157,7 @@ describe("tila admin list", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
@@ -225,7 +225,7 @@ describe("tila admin grant", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
@@ -329,7 +329,7 @@ describe("tila admin revoke", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
@@ -439,7 +439,7 @@ describe("tila admin — --token / TILA_TOKEN override (C5 bootstrap)", () => {
 
   beforeEach(async () => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);

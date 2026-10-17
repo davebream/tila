@@ -194,9 +194,9 @@ describe("deleteR2Bucket", () => {
   });
 
   it("continues deleting remaining objects after per-key failure", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => {});
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     const objectsDelete = vi
       .fn()
       .mockRejectedValueOnce(new Error("access denied"))
@@ -221,9 +221,9 @@ describe("deleteR2Bucket", () => {
     const result = await deleteR2Bucket(client, "acct-1", "my-bucket");
     expect(result.ok).toBe(true);
     expect(objectsDelete).toHaveBeenCalledTimes(2);
-    expect(consoleError).toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalled();
     expect(bucketDelete).toHaveBeenCalled();
-    consoleError.mockRestore();
+    stderrSpy.mockRestore();
   });
 
   it("deletes all objects across paginated results", async () => {

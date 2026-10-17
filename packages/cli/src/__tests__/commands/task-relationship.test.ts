@@ -166,7 +166,7 @@ describe("task relationship commands", () => {
           json: false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      expect(errorSpy).toHaveBeenCalledWith(
+      expect(stderrSpy).toHaveBeenCalledWith(
         expect.stringContaining("parent-child"),
       );
       expect(mockAddRelationship).not.toHaveBeenCalled();
@@ -570,7 +570,7 @@ describe("task relationship commands", () => {
           "link-parent": false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      expect(errorSpy).toHaveBeenCalledWith(
+      expect(stderrSpy).toHaveBeenCalledWith(
         expect.stringContaining("Task id must not contain '/'"),
       );
       expect(mockCreate).not.toHaveBeenCalled();
@@ -605,7 +605,7 @@ describe("task relationship commands", () => {
           "link-parent": false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      expect(errorSpy).toHaveBeenCalledWith("Task epic.x already exists.");
+      expect(stderrSpy).toHaveBeenCalledWith("Task epic.x already exists.\n");
     });
 
     it("outputs JSON error for duplicate id with --json", async () => {
@@ -692,7 +692,9 @@ describe("task relationship commands", () => {
           json: false,
         }),
       ).rejects.toThrow("process.exit(1)");
-      expect(errorSpy).toHaveBeenCalledWith("--link-parent requires --parent");
+      expect(stderrSpy).toHaveBeenCalledWith(
+        "--link-parent requires --parent\n",
+      );
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
@@ -810,7 +812,7 @@ describe("task relationship commands", () => {
         }),
       ).rejects.toThrow("process.exit(1)");
 
-      const errMsg = errorSpy.mock.calls[0][0] as string;
+      const errMsg = stderrSpy.mock.calls[0][0] as string;
       expect(errMsg).toContain("Re-link with: tila task relationship add");
       expect(errMsg).toContain("epic.x");
       expect(errMsg).toContain("child.1");

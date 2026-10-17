@@ -63,9 +63,9 @@ describe("openInBrowser", () => {
 
   it("logs fallback message when execFile callback receives an error", () => {
     setPlatform("darwin");
-    const consoleSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     openInBrowser("https://example.com");
 
@@ -75,16 +75,16 @@ describe("openInBrowser", () => {
     ) => void;
     callback(new Error("spawn ENOENT"));
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "Could not open browser automatically. Open this URL manually: https://example.com",
+    expect(stderrSpy).toHaveBeenCalledWith(
+      "Could not open browser automatically. Open this URL manually: https://example.com\n",
     );
   });
 
   it("does not log when execFile succeeds", () => {
     setPlatform("darwin");
-    const consoleSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     openInBrowser("https://example.com");
 
@@ -93,7 +93,7 @@ describe("openInBrowser", () => {
     ) => void;
     callback(null);
 
-    expect(consoleSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it("passes URLs with special characters without shell interpretation", () => {

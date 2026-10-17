@@ -138,6 +138,7 @@ describe("tila schema apply", () => {
   // biome-ignore lint/suspicious/noExplicitAny: vitest spy types
   let exitSpy: any;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
@@ -147,6 +148,9 @@ describe("tila schema apply", () => {
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -154,6 +158,7 @@ describe("tila schema apply", () => {
   afterEach(() => {
     exitSpy.mockRestore();
     errorSpy.mockRestore();
+    stderrSpy.mockRestore();
     warnSpy.mockRestore();
     logSpy.mockRestore();
   });
@@ -228,7 +233,7 @@ describe("tila schema apply", () => {
     await runCmd(apply, { json: false });
 
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(stderrSpy).toHaveBeenCalledWith(
       expect.stringContaining("schema fragment"),
     );
   });
@@ -242,7 +247,7 @@ describe("tila schema apply", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     // Should mention the error
-    expect(spyOutput(errorSpy)).toContain("parse");
+    expect(spyOutput(stderrSpy)).toContain("parse");
   });
 
   it("(d) advisory warnings printed as a single block, not N bullets", async () => {

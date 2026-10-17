@@ -137,7 +137,7 @@ describe("tila artifact grep", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     mockGrepArtifacts.mockReset();
   });
 

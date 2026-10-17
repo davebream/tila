@@ -73,7 +73,7 @@ describe("tila repos register", () => {
 
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     // Throw on exit so control flow stops like the real process.exit would,
     // and so tests can assert the exit code.
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {

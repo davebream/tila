@@ -177,6 +177,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
   let project: EmbeddedProject;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
   // biome-ignore lint/suspicious/noExplicitAny: vitest spy types
   let exitSpy: any;
 
@@ -192,6 +193,9 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
     });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
@@ -200,6 +204,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
   afterEach(() => {
     logSpy.mockRestore();
     errorSpy.mockRestore();
+    stderrSpy.mockRestore();
     exitSpy.mockRestore();
     project.close();
   });
@@ -274,7 +279,7 @@ describe("local-mode template / search reindex / schema diff (real EmbeddedProje
       json: false,
     });
     expect(exitSpy).toHaveBeenCalledWith(1);
-    const stderr = errorSpy.mock.calls
+    const stderr = stderrSpy.mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
     expect(stderr).toMatch(/not found/i);
@@ -434,7 +439,7 @@ describe("remote-only commands fail fast in local mode", () => {
       client: null,
       machine: "test-machine",
     });
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     vi.spyOn(console, "log").mockImplementation(() => {});
     exitSpy = vi
       .spyOn(process, "exit")

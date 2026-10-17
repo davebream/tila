@@ -229,6 +229,12 @@ describe("deploy command", () => {
   it("deploys Worker and UI via wrangler and exits 0", async () => {
     await invokeDeploy(false);
 
+    expect(mockNote).toHaveBeenCalledWith(
+      expect.stringMatching(/acc-123[\s\S]*d1-456[\s\S]*tila-artifacts/),
+      expect.stringContaining("Deployment target"),
+    );
+    expect(mockDiagnostic).not.toHaveBeenCalled();
+
     expect(mockDeployWorkerWithAssets).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: "acc-123",
