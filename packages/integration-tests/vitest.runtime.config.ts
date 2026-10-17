@@ -23,7 +23,11 @@ export default defineConfig({
       main: "./runtime/worker.ts",
       miniflare: {
         compatibilityDate: production.compatibility_date as string,
-        compatibilityFlags: (production.compatibility_flags ?? []) as string[],
+        compatibilityFlags: [
+          ...((production.compatibility_flags ?? []) as string[]),
+          // SDK backup round trips write archives to the test runtime's /tmp.
+          "enable_nodejs_fs_module",
+        ],
         durableObjects: {
           PROJECT: { className: "ProjectDO", useSQLite: true },
           MIGRATION: { className: "MigrationFixture", useSQLite: true },
