@@ -1354,21 +1354,29 @@ async function importCloud(options: ImportProjectBackupOptions): Promise<{
     });
     newProject = bootstrap.created;
   }
-  for (const [feature, version] of [
-    ["work-questions-v1", 36],
-    ["attempt-corrections-v1", 40],
-  ] as const) {
-    if (!inspected.manifest.required_features.includes(feature)) continue;
+  const requiredFeatureVersions = (
+    [
+      ["work-questions-v1", 36],
+      ["attempt-corrections-v1", 40],
+    ] as const
+  ).filter(([feature]) =>
+    inspected.manifest.required_features.includes(feature),
+  );
+  if (requiredFeatureVersions.length > 0) {
+    // Capabilities are available before a transfer begins. Snapshot metadata
+    // requires an owned export session, which import preflight does not have.
     const target = await client.json<{ migrationVersion: number }>(
-      options.recovery ? "/capabilities" : "/transfer/meta",
+      "/capabilities",
     );
-    if (
-      !Number.isInteger(target.migrationVersion) ||
-      target.migrationVersion < version
-    )
-      throw new Error(
-        `Destination does not support ${feature}; upgrade the Worker before restoring`,
-      );
+    for (const [feature, version] of requiredFeatureVersions) {
+      if (
+        !Number.isInteger(target.migrationVersion) ||
+        target.migrationVersion < version
+      )
+        throw new Error(
+          `Destination does not support ${feature}; upgrade the Worker before restoring`,
+        );
+    }
   }
   if (options.replace && !options.resume && !options.rollback) {
     safetyBackup =
