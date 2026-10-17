@@ -13,7 +13,7 @@ import test from "node:test";
 
 const script = resolve(".agents/skills/tila-release/scripts/run-gate-bench.sh");
 
-function fixture(t, failAt = 0) {
+function fixture(t, failAt = 0, quietFailure = false) {
   const root = mkdtempSync(join(tmpdir(), "tila-gate-bench-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync("git", ["init", "-q", root]);
@@ -22,7 +22,7 @@ function fixture(t, failAt = 0) {
   mkdirSync(join(root, "packages/bench/results"), { recursive: true });
   writeFileSync(
     join(root, "fixture.json"),
-    JSON.stringify({ failAt, calls: 0, urls: [] }),
+    JSON.stringify({ failAt, quietFailure, calls: 0, urls: [] }),
   );
   writeFileSync(join(root, "project.json"), '{"result":{"token":"fixture"}}');
   writeFileSync(
@@ -35,6 +35,7 @@ const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
 state.calls++;
 state.urls.push(process.env.TILA_BASE_URL);
 fs.writeFileSync(stateFile, JSON.stringify(state));
+if (state.calls === state.failAt && state.quietFailure) process.exit(42);
 const name = process.argv[process.argv.indexOf("--scenario") + 1];
 const op = name === "claims-uncontended" ? "acquire" : "update";
 const result = { scenarios: [{ name, ops: { [op]: {
@@ -78,15 +79,17 @@ if (state.calls === state.failAt) process.exit(42);
 }
 
 for (const mode of ["full", "ab"]) {
-  test(`${mode} benchmark gate preserves child failure and stops subsequent runs`, (t) => {
-    const f = fixture(t, 1);
-    const result = f.run(mode);
-    assert.ifError(result.error);
-    assert.equal(result.status, 42, result.stderr);
-    assert.match(result.stdout, /EXIT 42/);
-    assert.doesNotMatch(result.stdout, /AB EXIT 0/);
-    assert.equal(f.calls(), 1);
-  });
+  for (const quiet of [false, true]) {
+    test(`${mode} gate preserves ${quiet ? "silent" : "reported"} child failure and stops subsequent runs`, (t) => {
+      const f = fixture(t, 1, quiet);
+      const result = f.run(mode);
+      assert.ifError(result.error);
+      assert.equal(result.status, 42, result.stderr);
+      assert.match(result.stdout, /EXIT 42/);
+      assert.doesNotMatch(result.stdout, /AB EXIT 0/);
+      assert.equal(f.calls(), 1);
+    });
+  }
 }
 
 test("A/B report selects primary-operation percentiles rather than server timing", (t) => {

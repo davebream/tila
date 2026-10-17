@@ -41,9 +41,15 @@ gate() { # label url project json args...
 }
 
 ab_run() { # label url project json args...
-  local label=$1 rc=0
+  local label=$1 rc=0 stage_status
+  local -a stages=(0)
   shift
-  bench "$@" 2>&1 | grep '\[bench\] .*ops in' | sed "s/^/$label: /" || rc=$?
+  bench "$@" 2>&1 | grep '\[bench\] .*ops in' | sed "s/^/$label: /" || stages=("${PIPESTATUS[@]}")
+  # A silent benchmark failure also makes grep fail. Preserve the benchmark's
+  # status before considering failures in the output filters.
+  for stage_status in "${stages[@]}"; do
+    if [ "$stage_status" -ne 0 ]; then rc=$stage_status; break; fi
+  done
   echo "$label EXIT $rc"
   return "$rc"
 }
