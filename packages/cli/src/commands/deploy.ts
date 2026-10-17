@@ -130,12 +130,13 @@ export default defineCommand({
           : "DEPLOY_TARGET_UNVERIFIED",
       );
     }
-    diagnostic(
-      `Deployment target (${target.source}): ${target.infraSlug}\n` +
-        `Account: ${target.accountName} (${target.accountId})\n` +
-        `Worker: ${target.scriptName}${target.workerUrl ? ` (${target.workerUrl})` : ""}\n` +
-        `D1: ${target.d1DatabaseId}\nR2: ${target.r2BucketName}\n${describeDeploymentSettings(target.settings)}`,
-    );
+    const targetTitle = `Deployment target (${target.source}): ${target.infraSlug}`;
+    const targetDetails =
+      `Account: ${target.accountName} (${target.accountId})\n` +
+      `Worker: ${target.scriptName}${target.workerUrl ? ` (${target.workerUrl})` : ""}\n` +
+      `D1: ${target.d1DatabaseId}\nR2: ${target.r2BucketName}\n${describeDeploymentSettings(target.settings)}`;
+    if (json) diagnostic(`${targetTitle}\n${targetDetails}`);
+    else p.note(targetDetails, targetTitle);
 
     const s = json ? null : p.spinner();
     s?.start("Checking D1 migrations...");
