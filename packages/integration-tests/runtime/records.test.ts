@@ -4,6 +4,7 @@ import {
   canonicalJson,
   canonicalJsonSha256,
 } from "@tila/schemas";
+import { TilaApiError, TilaClient, createRecordMethods } from "tila-sdk";
 import { expect, it } from "vitest";
 import { CredentialStore } from "../../worker/src/d1/credential-store";
 import { generateToken } from "../../worker/src/lib/hash";
@@ -662,5 +663,37 @@ it("keeps a write-only record credential to a receipt and refuses reads before a
   const stored = await admin("/records/config/team/a/head");
   expect(await stored.json()).toMatchObject({
     record: { value: { region: "replaced" }, tags: ["stored-tag"] },
+  });
+});
+
+it("preserves the SDK conflict code when a record key already exists (#592)", async () => {
+  const { projectId, token } = await fixture();
+  const records = createRecordMethods(
+    new TilaClient({
+      baseUrl: "https://worker",
+      token,
+      participantId: "record-conflict-writer",
+      fetch: (input, init) =>
+        SELF.fetch(input, { ...init, redirect: "manual" }),
+    }),
+    projectId,
+  );
+  await records.create("revision", {
+    key: "existing",
+    value: { region: "original" },
+  });
+  const duplicate = records.create("revision", {
+    key: "existing",
+    value: { region: "replacement" },
+  });
+  await expect(duplicate).rejects.toBeInstanceOf(TilaApiError);
+  await expect(duplicate).rejects.toMatchObject({
+    status: 409,
+    code: "conflict",
+    message: "Record revision/existing already exists",
+    retryable: false,
+  });
+  expect(await records.get("revision", "existing")).toMatchObject({
+    record: { value: { region: "original" }, revision: 1 },
   });
 });

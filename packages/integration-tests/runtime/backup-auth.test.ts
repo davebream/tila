@@ -1,4 +1,5 @@
 import { SELF } from "cloudflare:test";
+import { TilaApiError, TilaClient } from "tila-sdk";
 import { describe, expect, it } from "vitest";
 import { D1TokenStore } from "../../worker/src/d1";
 import { hashToken } from "../../worker/src/lib/hash-token";
@@ -233,5 +234,32 @@ describe("infrastructure-token backup route", () => {
     expect(await sweep.json()).toMatchObject({
       error: { message: "Invalid sweep secret" },
     });
+  });
+});
+
+it("reads a real management error without ok through the SDK (#592)", async () => {
+  const projectId = `backup-envelope-${crypto.randomUUID()}`;
+  const token = await seedProject(projectId);
+  const client = new TilaClient({
+    baseUrl: "https://worker",
+    token,
+    participantId: "backup-operator",
+    fetch: async (input, init) => {
+      const response = await SELF.fetch(input, { ...init, redirect: "manual" });
+      const body = await response.clone().json<Record<string, unknown>>();
+      expect(body).not.toHaveProperty("ok");
+      return response;
+    },
+  });
+  const result = client.post(
+    `/projects/${projectId}/admin/backup/transfer/unknown`,
+    {},
+  );
+  await expect(result).rejects.toBeInstanceOf(TilaApiError);
+  await expect(result).rejects.toMatchObject({
+    status: 404,
+    code: "not-found",
+    message: "Unknown backup transfer action",
+    retryable: false,
   });
 });
