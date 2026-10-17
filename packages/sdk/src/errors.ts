@@ -23,9 +23,9 @@ export function isTilaApiError(err: unknown): err is TilaApiError {
 }
 
 // Lenient read of the error envelope: keep fields beyond code/message and
-// accept envelopes that omit `retryable` (some management routes do).
+// accept envelopes that omit `ok` or `retryable` (some management routes do).
 const ApiErrorBodySchema = z.object({
-  ok: z.literal(false),
+  ok: z.literal(false).optional(),
   error: z
     .object({
       code: z.string(),

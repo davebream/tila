@@ -25,6 +25,9 @@ function invoke(args: string[], input = "") {
     input,
     encoding: "utf8",
     timeout: 15000,
+    // Full introspection repeats the public error catalog for each command.
+    // Keep a bounded buffer large enough for the complete schema output.
+    maxBuffer: 8 * 1024 * 1024,
   });
 }
 afterAll(() => rmSync(home, { recursive: true, force: true }));
@@ -97,6 +100,8 @@ describe("CLI invocation contract", () => {
   );
   it("introspection includes new review/lifecycle commands and preserves project schema", () => {
     const result = invoke(["schema"]);
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
     const schema = JSON.parse(result.stdout).result;
     expect(schema.commands).toEqual(
       expect.arrayContaining([

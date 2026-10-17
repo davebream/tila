@@ -1,8 +1,8 @@
 /**
  * Typed error code constants for all tila API error responses.
  *
- * Keys are normalized identifiers. Values are the exact kebab-case wire-format
- * strings returned by the worker and DO layers.
+ * Keys are normalized identifiers. Values preserve the exact wire-format
+ * strings returned by the worker and DO layers (including legacy spelling).
  */
 export const TILA_ERRORS = {
   SCHEMA_REVISION_REQUIRED: "schema-revision-required",
@@ -138,7 +138,75 @@ export const TILA_ERRORS = {
   REPORT_CORRECTION_DENIED: "report-correction-denied",
   HANDOFF_NOT_FOUND: "handoff-not-found",
   HANDOFF_CONFLICT: "handoff-conflict",
-  // Fallback (SDK-generated when response is unparseable)
+  // Additional public server codes reconciled in #592.
+  // DO_DESTROY_FAILED preserves the legacy destroy fallback spelling.
+  DO_DESTROY_FAILED: "DO_DESTROY_FAILED",
+  ACCOUNT_ERROR: "account-error",
+  ACCOUNT_MIGRATION_REQUIRED: "account-migration-required",
+  ALREADY_EXISTS: "already-exists",
+  APP_NOT_CONFIGURED: "app-not-configured",
+  ARTIFACT_LINEAGE_DESTROYED: "artifact-lineage-destroyed",
+  ARTIFACT_NOT_ACCEPTED: "artifact-not-accepted",
+  ARTIFACT_NOT_EXPIRED: "artifact-not-expired",
+  ARTIFACT_REVIEW_REQUIRED: "artifact-review-required",
+  CHECKSUM_MISMATCH: "checksum-mismatch",
+  COMMIT_CONFLICT: "commit-conflict",
+  CONFIRM_ERROR: "confirm-error",
+  CONFIRM_SLUG_MISMATCH: "confirm-slug-mismatch",
+  CONFLICT: "conflict",
+  CREDENTIAL_CONFLICT: "credential-conflict",
+  CREDENTIAL_UNAVAILABLE: "credential-unavailable",
+  D1_TOKEN_REQUIRED: "d1-token-required",
+  DESTROY_FAILED: "destroy-failed",
+  DO_ERROR: "do-error",
+  EXCHANGE_IN_PROGRESS: "exchange-in-progress",
+  GATE_BLOCKED: "gate-blocked",
+  GITHUB_ERROR: "github-error",
+  GITHUB_LOGIN_DISABLED: "github-login-disabled",
+  GITHUB_USER_NOT_FOUND: "github-user-not-found",
+  GREP_CANDIDATES_FAILED: "grep-candidates-failed",
+  IDEMPOTENCY_UNAVAILABLE: "idempotency-unavailable",
+  INVALID_COMMIT_RECORD: "invalid-commit-record",
+  INVALID_GREP_PATTERN: "invalid-grep-pattern",
+  INVALID_ID: "invalid-id",
+  INVALID_LIFECYCLE_RECORD: "invalid-lifecycle-record",
+  INVALID_LIFECYCLE_STATE: "invalid-lifecycle-state",
+  INVALID_SESSION: "invalid-session",
+  INVALID_STATE: "invalid-state",
+  LAST_ADMIN: "last-admin",
+  LAST_OWNER: "last-owner",
+  LOGIN_UNRESOLVED: "login-unresolved",
+  MEMBERSHIP_REQUIRED: "membership-required",
+  MEMBERSHIP_UNAVAILABLE: "membership-unavailable",
+  MISSING_FENCE: "missing-fence",
+  MISSING_IDEMPOTENCY_KEY: "missing-idempotency-key",
+  MISSING_KEY: "missing-key",
+  NO_SCHEMA: "no-schema",
+  NOT_CONFIGURED: "not-configured",
+  OIDC_INVALID_CONFIGURATION: "oidc-invalid-configuration",
+  OIDC_NOT_IMPLEMENTED: "oidc-not-implemented",
+  OIDC_POLICY_INVALID: "oidc-policy-invalid",
+  PEER_POINTER_KEYS_FETCH_FAILED: "peer-pointer-keys-fetch-failed",
+  PERMISSION_RECHECK_UNAVAILABLE: "permission-recheck-unavailable",
+  POINTER_KEYS_FETCH_FAILED: "pointer-keys-fetch-failed",
+  POINTER_REGISTRATION_FAILED: "pointer-registration-failed",
+  PROJECT_MAINTENANCE: "project-maintenance",
+  PROJECT_REQUIRED: "project-required",
+  R2_ERROR: "r2-error",
+  REVIEW_CONFLICT: "review-conflict",
+  REVOKE_FAILED: "revoke-failed",
+  SCHEMA_CORRUPT: "schema-corrupt",
+  SCHEMA_PARSE_ERROR: "schema-parse-error",
+  SCHEMA_REVISION_DEPRECATED: "schema-revision-deprecated",
+  SEMANTIC_DIGEST_MISMATCH: "semantic-digest-mismatch",
+  SESSION_REAUTH_REQUIRED: "session-reauth-required",
+  STEP_UP_REQUIRED: "step-up-required",
+  TOKEN_LOGIN_RETIRED: "token-login-retired",
+  TOMBSTONE_FAILED: "tombstone-failed",
+  TRANSFER_CONFLICT: "transfer-conflict",
+  UPLOAD_FAILED: "upload-failed",
+  VERSIONED_CLEANUP_FAILED: "versioned-cleanup-failed",
+  // Fallback for unrecognized codes or unparseable error responses.
   UNKNOWN: "UNKNOWN",
 } as const;
 

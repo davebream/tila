@@ -5,6 +5,8 @@ import {
   type TilaErrorCode,
   toTilaErrorCode,
 } from "../error-codes";
+import { readApiError } from "../errors";
+import type { TilaErrorCode as PublicTilaErrorCode } from "../index";
 
 describe("toTilaErrorCode normalizer", () => {
   it("passes through known wire codes unchanged", () => {
@@ -191,5 +193,136 @@ describe("readApiError", () => {
     );
     expect(error).toMatchObject({ status: 409, retryable: false });
     expect(error.message).toBe("Keep one owner");
+  });
+});
+
+describe("record conflicts and management error envelopes (#592)", () => {
+  it("exposes conflict in the public error-code type and preserves its wire value", () => {
+    const code: PublicTilaErrorCode = "conflict";
+    const error = new TilaApiError(409, code, "Record already exists", false);
+    expect(error.code === "conflict").toBe(true);
+    expect(TILA_ERRORS.CONFLICT).toBe(code);
+    expect(toTilaErrorCode(code)).toBe(code);
+  });
+
+  it.each([false, undefined])(
+    "accepts a valid error with ok=%s",
+    async (ok) => {
+      const error = await readApiError(
+        Response.json(
+          {
+            ...(ok === undefined ? {} : { ok }),
+            error: {
+              code: "conflict",
+              message: "Record already exists",
+              revision: 7,
+            },
+          },
+          { status: 409 },
+        ),
+      );
+      expect(error).toBeInstanceOf(TilaApiError);
+      expect(error).toMatchObject({
+        status: 409,
+        code: "conflict",
+        message: "Record already exists",
+        retryable: false,
+        extras: { revision: 7 },
+      });
+    },
+  );
+
+  it("preserves explicit retryability and extras without ok", async () => {
+    const error = await readApiError(
+      Response.json(
+        {
+          error: {
+            code: "idempotency-unavailable",
+            message: "Try later",
+            retryable: true,
+            delay: 2,
+          },
+        },
+        { status: 503 },
+      ),
+    );
+    expect(error).toMatchObject({
+      status: 503,
+      code: "idempotency-unavailable",
+      message: "Try later",
+      retryable: true,
+      extras: { delay: 2 },
+    });
+  });
+
+  it.each([false, undefined])(
+    "preserves future error metadata with ok=%s",
+    async (ok) => {
+      const error = await readApiError(
+        Response.json(
+          {
+            ...(ok === undefined ? {} : { ok }),
+            error: {
+              code: "some-future-code",
+              message: "Future error",
+              retryable: true,
+              detail: "kept",
+            },
+          },
+          { status: 409 },
+        ),
+      );
+      expect(error).toMatchObject({
+        status: 409,
+        code: "UNKNOWN",
+        message: "Future error",
+        retryable: true,
+        extras: { detail: "kept" },
+      });
+    },
+  );
+
+  it.each([
+    { ok: true, error: { code: "conflict", message: "Contradiction" } },
+    { ok: null, error: { code: "conflict", message: "Invalid ok" } },
+    { error: { code: 409, message: "Wrong code type" } },
+    { error: { code: "conflict", message: null } },
+    { error: { code: "conflict" } },
+    { error: { message: "Missing code" } },
+    {
+      error: {
+        code: "conflict",
+        message: "Invalid retryable",
+        retryable: "true",
+      },
+    },
+    { error: null },
+    {},
+  ])("rejects malformed or contradictory envelopes: %j", async (body) => {
+    const error = await readApiError(
+      Response.json(body, { status: 409, statusText: "Conflict" }),
+    );
+    expect(error).toMatchObject({
+      status: 409,
+      code: "UNKNOWN",
+      message: "HTTP 409: Conflict",
+      retryable: false,
+      extras: {},
+    });
+  });
+
+  it("retains the fallback for non-JSON errors", async () => {
+    const error = await readApiError(
+      new Response("upstream unavailable", {
+        status: 502,
+        statusText: "Bad Gateway",
+      }),
+    );
+    expect(error).toMatchObject({
+      status: 502,
+      code: "UNKNOWN",
+      message: "HTTP 502: Bad Gateway",
+      retryable: false,
+    });
   });
 });

@@ -657,7 +657,7 @@ try {
         console.error(`API error ${err.status}: [${err.code}] ${err.message}`);
     }
   } else {
-    // Network error, timeout, or malformed response
+    // Network error or timeout
     console.error("Non-API error:", err);
   }
 }
@@ -668,13 +668,14 @@ try {
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `number` | HTTP status code |
-| `code` | `string` | Machine-readable error code |
+| `code` | `TilaErrorCode` | Known wire code, or `"UNKNOWN"` for an unrecognized code or malformed error response |
 | `message` | `string` | Human-readable description |
 | `retryable` | `boolean` | Whether the server considers this retryable |
+| `extras` | `Record<string, unknown>` | Additional server fields, such as the current revision |
 
 ### Error Code Conventions
 
-All HTTP `error.code` values use **kebab-case** (`^[a-z][a-z0-9-]*$`), e.g. `"unauthorized"`, `"stale-fence"`, `"validation-error"`.
+HTTP `error.code` values normally use **kebab-case**, e.g. `"unauthorized"`, `"stale-fence"`, `"validation-error"`. The SDK preserves exact server spelling, including the legacy `"DO_DESTROY_FAILED"` fallback.
 
 The `TILA_ERRORS` constant object maps typed keys to exact wire strings so you never hardcode literals:
 
@@ -683,7 +684,12 @@ TILA_ERRORS.UNAUTHORIZED    // "unauthorized"
 TILA_ERRORS.STALE_FENCE     // "stale-fence"
 TILA_ERRORS.NOT_FOUND       // "not-found"
 TILA_ERRORS.RATE_LIMITED    // "rate-limited"
+TILA_ERRORS.CONFLICT        // "conflict" (for example, a record key already exists)
 ```
+
+Creating an existing record key throws `TilaApiError` with status `409` and code `TILA_ERRORS.CONFLICT`. The public `TilaErrorCode` union includes `"conflict"`, so comparing `err.code === "conflict"` is also type-safe. New SDK versions can add known codes; consumers with exhaustive switches must handle those additions.
+
+For failed HTTP responses, the SDK accepts valid error objects with `ok: false` or with `ok` omitted. It preserves the server message and extra fields and defaults omitted `retryable` to `false`. Unknown future codes become `"UNKNOWN"` while retaining that metadata. Malformed error envelopes, including an explicit `ok: true`, instead produce the generic HTTP-error fallback.
 
 ### Retry Wrapper
 
