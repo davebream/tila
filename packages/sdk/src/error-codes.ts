@@ -149,6 +149,7 @@ export const TILA_ERRORS = {
   ARTIFACT_NOT_ACCEPTED: "artifact-not-accepted",
   ARTIFACT_NOT_EXPIRED: "artifact-not-expired",
   ARTIFACT_REVIEW_REQUIRED: "artifact-review-required",
+  BLOB_DELETE_CONFIRMATION_FAILED: "blob-delete-confirmation-failed",
   CHECKSUM_MISMATCH: "checksum-mismatch",
   COMMIT_CONFLICT: "commit-conflict",
   CONFIRM_ERROR: "confirm-error",
