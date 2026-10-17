@@ -855,7 +855,7 @@ export default defineCommand({
       } else if (warned > 0) {
         p.log.warn(`${passed} passed, ${warned} warnings`);
       } else {
-        p.log.info(`${passed} passed`);
+        p.log.success(`${passed} passed`);
       }
     }
 

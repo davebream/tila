@@ -181,7 +181,7 @@ describe("record commands (local mode, real EmbeddedProject)", () => {
       schema: project,
     });
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errorSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);

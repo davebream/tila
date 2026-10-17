@@ -119,17 +119,23 @@ export function warning(...args: unknown[]): void {
   );
 }
 export function diagnostic(...args: unknown[]): void {
-  const message = stripVTControlCharacters(format(...args));
-  currentOutput()?.diagnostics.push(message);
-  console.error(
-    currentOutput()?.json
-      ? JSON.stringify({
-          type: "diagnostic",
-          level: "info",
-          message,
-        } satisfies CliDiagnostic)
-      : message,
-  );
+  const formatted = format(...args);
+  const message = stripVTControlCharacters(formatted);
+  const state = currentOutput();
+  state?.diagnostics.push(message);
+  // Bun colors console.error red, even when the message is informational.
+  const rendered = state?.json
+    ? JSON.stringify({
+        type: "diagnostic",
+        level: "info",
+        message,
+      } satisfies CliDiagnostic)
+    : process.stderr.isTTY &&
+        !process.env.CI &&
+        process.env.NO_COLOR === undefined
+      ? formatted
+      : message;
+  process.stderr.write(`${rendered}\n`);
 }
 /** Explicit bypass for external protocols, tokens, and downloaded bytes. */
 export function rawOutput(value: string | Uint8Array): void {
