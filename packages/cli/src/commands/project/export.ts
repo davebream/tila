@@ -68,7 +68,7 @@ export default defineCommand({
     if (args.json) printJson(result);
     else
       p.note(
-        `Rows: ${manifest.stats.rows}\nBlobs: ${manifest.stats.objects}\nBytes: ${manifest.stats.archive_bytes}\nElapsed: ${manifest.stats.elapsed_ms} ms\nOutput: ${args.output}`,
+        `Rows: ${manifest.stats.rows}\nBlobs: ${manifest.stats.objects}\nArchive bytes: ${manifest.stats.archive_bytes}\nElapsed: ${manifest.stats.elapsed_ms} ms\nOutput: ${args.output}`,
         "Project backup complete",
       );
   },

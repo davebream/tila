@@ -68,6 +68,9 @@ export const ProjectBackupManifestSchema = z.object({
     rows: z.number().int().nonnegative(),
     objects: z.number().int().nonnegative(),
     blob_bytes: z.number().int().nonnegative(),
+    /** Completed tar file size, including manifest, headers, padding and end blocks.
+     * Readers normalize legacy format-v1 payload totals to the measured file size.
+     */
     archive_bytes: z.number().int().nonnegative(),
     elapsed_ms: z.number().int().nonnegative(),
   }),

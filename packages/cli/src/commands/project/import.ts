@@ -152,7 +152,7 @@ export default defineCommand({
     if (args.json) printJson(output);
     else
       p.note(
-        `Project: ${result.manifest.project_id}\nRows: ${result.manifest.stats.rows}\nBytes: ${result.manifest.stats.archive_bytes}${result.safetyBackup ? `\nSafety backup: ${result.safetyBackup}` : ""}`,
+        `Project: ${result.manifest.project_id}\nRows: ${result.manifest.stats.rows}\nArchive bytes: ${result.manifest.stats.archive_bytes}${result.safetyBackup ? `\nSafety backup: ${result.safetyBackup}` : ""}`,
         "Project restore complete",
       );
   },

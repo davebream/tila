@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -8,6 +15,9 @@ import { insertLegacyDigestRows } from "../../ops-sqlite/test/fixtures/legacy-di
 import {
   checkpointTime,
   createProjectCheckpoint,
+  exportProjectBackup,
+  importProjectBackup,
+  inspectProjectBackup,
   listProjectCheckpoints,
   planProjectRecovery,
   restoreProjectCheckpoint,
@@ -220,6 +230,74 @@ function assertRecovered() {
 }
 
 describe("complete checkpoint recovery", () => {
+  it.each([false, true])(
+    "reports actual archive bytes for cloud export (checkpoint: %s)",
+    async (withCheckpoint) => {
+      const archive = join(root, "sizes.tila-backup");
+      const exported = await exportProjectBackup({
+        source,
+        output: archive,
+        ...(withCheckpoint
+          ? {
+              checkpoint: {
+                version: 1 as const,
+                id: "8c4f3c9d-f971-483b-9d6e-52a35ad57481",
+                project_id: source.projectId,
+                instance: source.baseUrl,
+                account_id: "cf",
+              },
+            }
+          : {}),
+      });
+      const size = (await stat(archive)).size;
+      const inspected = await inspectProjectBackup(archive);
+      // Read the raw tar independently of SDK inspection, which normalizes
+      // historical statistics. Skip entries using their actual tar header sizes.
+      const bytes = await readFile(archive);
+      let storedBytes: number | undefined;
+      for (let offset = 0; offset + 512 <= bytes.length; ) {
+        const name = bytes
+          .toString("utf8", offset, offset + 100)
+          .split("\0")[0];
+        const length = Number.parseInt(
+          bytes.toString("ascii", offset + 124, offset + 136),
+          8,
+        );
+        if (!name) break;
+        offset += 512;
+        if (name === "manifest.json") {
+          storedBytes = JSON.parse(
+            bytes.toString("utf8", offset, offset + length),
+          ).stats.archive_bytes;
+          break;
+        }
+        offset += Math.ceil(length / 512) * 512;
+      }
+      expect(storedBytes).toBe(size);
+      expect(exported.stats.archive_bytes).toBe(size);
+      expect(inspected.manifest.stats.archive_bytes).toBe(size);
+      expect(Boolean(inspected.checkpoint)).toBe(withCheckpoint);
+      if (withCheckpoint) {
+        expect(inspected.checkpoint?.account_id).toBe(
+          exported.source.cloudflare_account_id,
+        );
+      }
+      // A local restore covers the public import result without depending on
+      // the unrelated ordinary cloud-import preflight behavior.
+      const restored = await importProjectBackup({
+        archive,
+        destination: {
+          backend: "local",
+          projectId: source.projectId,
+          dbPath: join(root, "restored.db"),
+          artifactsPath: join(root, "restored-artifacts"),
+        },
+      });
+      expect(restored.manifest.stats.archive_bytes).toBe(size);
+      expect(restored.manifest.semantic_digest).toBe(exported.semantic_digest);
+    },
+  );
+
   it("restores project data and files, preserves current access, and verifies a durable receipt", async () => {
     const { plan } = await checkpointAndChange();
     // A deleted blob is represented as deleted in the current state, so the safety archive is complete too.
