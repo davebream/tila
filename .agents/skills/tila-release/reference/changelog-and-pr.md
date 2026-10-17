@@ -71,11 +71,15 @@ House style (see the 0.6.0 and 0.7.0 entries):
   bullet lists.
 - Gloss queue and runtime terms the first time (attempt, enroller, fence).
 
-## README status line
+## README status and current delivery labels
 
 Replace line `> **Status:** vPREV ...` in `README.md` with the new version, the single
 most important upgrade instruction, and a link to `CHANGELOG.md#xyz---yyyy-mm-dd`
 (anchor: version without dots, three dashes, date).
+
+Also update the current `Delivered as of vPREV` label. Keep intentional historical
+version references, and run `node --test scripts/version-docs.test.mjs` before the
+first release commit to catch stale install, usage and delivery labels.
 
 ## Release PR
 
