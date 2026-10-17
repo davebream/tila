@@ -1,28 +1,37 @@
-# Coordination benchmark baseline — v0.11.1 release validation
+# Coordination benchmark baseline — v0.12.0 release validation
 
 ## Release gate summary (2026-10-17)
 
-All live correctness gates passed on disposable Cloudflare infrastructure. The six-scenario matrix, one 24-participant owner-contention run, the six-participant 500 ms cadence control and five cold restarts recorded 13,889 operations with zero unexpected errors, and all 24 invariants passed. A separate three-test persistence gate confirmed task data survived acknowledged Durable Object eviction and restart.
+All live correctness gates passed on disposable Cloudflare infrastructure. The six-scenario matrix, one 24-participant owner-contention run, the six-participant 500 ms cadence control and five cold restarts recorded 7,378 operations with zero unexpected errors, and all 24 invariants passed. A separate three-test persistence gate confirmed task data survived acknowledged Durable Object eviction and restart.
 
-The isolated Worker used its own D1 database, DO namespace and R2 bucket. This release adds no migrations, so no new D1 or project migration was exercised. Worker and benchmark source was `666ef43ea0bffd0b794e9ce6737a873adfa7eb47`, with public release metadata at 0.11.1, and `/api/health` reported that exact version and commit; the later release commits change only `CHANGELOG.md`, `README.md` and this file. The cold-start run's table row reads `(dirty)` because the build rewrote `AGENTS.md` inside the gate worktree, not because source differed. The client was macOS arm64 and Cloudflare served the runs from WAW with local-WAW placement. Production resources were not changed. Cleanup destroyed the project with DO, R2, D1 and local stores verified successful and no failures, then removed the disposable Worker, D1 database and R2 bucket. Direct API reads confirmed removal, and a production D1 read confirmed it remained present.
+The isolated Worker used its own D1 database, DO namespace and R2 bucket. This release adds no migrations, so no new D1 or project migration was exercised. Worker and benchmark source was `b8ce4c6449143285a1d8c38652c20eab370c1a93`, with public release metadata at 0.12.0, and `/api/health` reported that exact version and commit; the later release commits change only `CHANGELOG.md` and this file. The cold-start run's table row may read `(dirty)` because the build rewrites `AGENTS.md` inside the gate worktree, not because source differed. The client was macOS arm64 in Wrocław. Production resources were not changed. Cleanup destroyed both projects with DO, R2, D1 and local stores verified successful and no failures, then removed the disposable Worker, D1 database and R2 bucket. Direct API reads confirmed removal, and a production D1 read confirmed it remained present. The benchmark's artifacts scenario deletes every uploaded key at teardown, so the changed artifact-deletion route ran, but those calls are best-effort and unmeasured; the run says nothing about blob-removal behaviour.
 
-Latency remains advisory. Against the v0.11.0 baseline from 2026-10-16, every gated signal was at or below its previous value:
+Latency remains advisory, and this run was slower than the 0.11.1 baseline from the same day:
 
-| Signal | v0.11.0 | v0.11.1 |
+| Signal | v0.11.1 baseline | v0.12.0 |
 |---|---:|---:|
-| Eight-participant contended acquire p95 | 206 ms | 179.25 ms |
-| Fenced update p95 | 227.25 ms | 191 ms |
-| Signal send p95 | 215 ms | 191.33 ms |
-| Journal replay p95 | 186 ms | 171.33 ms |
-| 24-participant owner-contention acquire p95 | 451.5 ms | 357.14 ms |
-| Cold-first-request p50 | 147 ms | 145 ms |
+| Eight-participant contended acquire p95 | 179.25 ms | 388 ms |
+| Fenced update p95 | 191 ms | 387 ms |
+| Signal send p95 | 191.33 ms | 430 ms |
+| Journal replay p95 | 171.33 ms | 308 ms |
+| 24-participant owner-contention acquire p95 | 357.14 ms | 728 ms |
+| Cold-first-request p50 | 145 ms | 270 ms |
 
-No signal crossed the advisory regression threshold, so an A/B comparison against v0.11.0 was not required. The 500 ms cadence control missed 1 of its 360 scheduled deadlines (`missed_cadence_deadlines: 1`; the advisory target is 0, and 0.11.0 recorded none). Its acquire p95 was 313 ms across only 72 acquires, against 205 ms for 0.11.0, while the run's overall p95 was 191 ms. That points to one late tick rather than a sustained slowdown. The release changes only CLI output, the SDK's backup preflight and archive size reporting, so it cannot affect coordination latency.
+Every signal crossed the advisory 25% threshold, so the 0.11.1 Worker was deployed beside this one and both were benchmarked in alternation, two rounds each of 20-second, eight-participant runs. The release changes no coordination code: the Worker diff since v0.11.1 is limited to the plain artifact deletion route, and the SDK diff to its error-code list.
 
-Raw JSON is gitignored under `packages/bench/results/release-0111/`. Regenerate the tables with:
+| Scenario | v0.11.1 p95 (p50) round 1 | v0.12.0 p95 (p50) round 1 | v0.11.1 p95 (p50) round 2 | v0.12.0 p95 (p50) round 2 |
+|---|---:|---:|---:|---:|
+| claims-uncontended | 253 ms (233) | 282 ms (246) | 260 ms (226) | 394 ms (248) |
+| fenced-writes | 278 ms (228) | 260 ms (240) | 326 ms (228) | 362 ms (246) |
+
+The 0.11.1 Worker itself read about 230 ms p50 here, against 145 ms in its own baseline, so most of the gap to the stored baseline is the environment on the day (DO host, time of day, Cloudflare load), as in earlier releases. The paired runs are not identical: the 0.12.0 p50 was 5 to 10% higher than 0.11.1 in all four pairs, and its p95 was mixed, from 6% lower to 52% higher, with the largest gap in a single uncontended round. No consistent regression stands out, and each Worker deployment gets its own Durable Object placement, which alone can account for a few percent. Treat the paired difference as unresolved noise, not as proof of equality.
+
+The 500 ms cadence control missed 10 of its 360 scheduled deadlines (`missed_cadence_deadlines: 10`; the advisory target is 0, and 0.11.1 recorded 1). Its acquire p95 was 584 ms, consistent with the slower environment rather than a sustained stall.
+
+Raw JSON is gitignored under `packages/bench/results/release-0120/`. Regenerate the tables with:
 
 ```bash
-pnpm bench:report -- --in packages/bench/results/release-0111 --out /tmp/tila-release-0111-baseline.md
+pnpm bench:report -- --in packages/bench/results/release-0120 --out /tmp/tila-release-0120-baseline.md
 ```
 
 Latencies below are per facade call. Expected conflicts and stale-fence rejections are excluded from the unexpected-error rate.
@@ -31,44 +40,44 @@ Latencies below are per facade call. Expected conflicts and stale-fence rejectio
 
 Generated by `pnpm bench:report` from raw harness output (see docs/benchmarks/README.md for methodology and what each tier measures). Latencies are per facade call, measured by the harness around the SDK method; throughput counts every recorded sub-operation across all participants. Conflicts and stale-fence rejections are expected outcomes and are excluded from the error rate.
 
-## http deployed: cold-start (20261017-092642-a1gc)
+## http deployed: cold-start (20261017-142324-tr3f)
 
 | | |
 |---|---|
-| **Run** | `20261017-092642-a1gc` at 2026-10-17T09:26:42.962Z |
+| **Run** | `20261017-142324-tr3f` at 2026-10-17T14:23:24.025Z |
 | **Harness** | 1.1.0 (schema 1) |
-| **Git** | 666ef43ea0 (dirty) |
-| **Tier / target** | http / deployed (tila-rel0111.breamcode.workers.dev, colo WAW, placement local-WAW) |
+| **Git** | b8ce4c6449 (dirty) |
+| **Tier / target** | http / deployed (tila-rel0120.breamcode.workers.dev, colo WAW, placement local-WAW) |
 | **Hardware** | Apple M3 Pro × 12, 36864.0 MiB RAM, darwin 25.6.0 arm64, node v24.19.0 |
 | **Load** | 4 participants, 1 principal(s), 10s after 1s warmup |
 | **Params** | mode exclusive, groups 1, hold 0 ms, target tasks, steal every 5, sizes 1024/65536/1048576 B, seed 42 |
 
 #### cold-start
 
-POST /admin/restart to evict the DO, then time the first summary read (cold) and three more (warm after restart). 1 participant(s), 12.8s recorded.
+POST /admin/restart to evict the DO, then time the first summary read (cold) and three more (warm after restart). 1 participant(s), 15.7s recorded.
 Dataset: iterations=5, warm_reads=3, settle_ms=2000.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| cold_first_request | 5 | 5 | 0 | 0 | 0 | 0.39 | 145 | 268 | 268 | 268.95 |
-| restart | 5 | 5 | 0 | 0 | 0 | 0.39 | 113 | 146 | 146 | 146.1 |
-| warm_after_restart | 15 | 15 | 0 | 0 | 0 | 1.17 | 85.75 | 136.69 | 136.69 | 136.69 |
-| **total** | 25 | 25 | 0 | 0 | 0 | 1.95 | 93 | 147.33 | 268 | 268.95 |
+| cold_first_request | 5 | 5 | 0 | 0 | 0 | 0.32 | 270 | 476 | 476 | 477.76 |
+| restart | 5 | 5 | 0 | 0 | 0 | 0.32 | 198 | 476 | 476 | 478.67 |
+| warm_after_restart | 15 | 15 | 0 | 0 | 0 | 0.96 | 185 | 203.43 | 203.43 | 203.43 |
+| **total** | 25 | 25 | 0 | 0 | 0 | 1.59 | 198 | 474 | 478 | 478.67 |
 
 Timing for cold_first_request: 5/5 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 5 | 119 | 93 | 236 | 236 |
-| auth_rate_limit | 5 | 19.2 | 19.25 | 21 | 21 |
-| auth_token | 5 | 17.2 | 17.13 | 20 | 20 |
+| worker | 5 | 266.2 | 230 | 376 | 376 |
+| auth_rate_limit | 5 | 66.8 | 68.5 | 70 | 70 |
+| auth_token | 5 | 71.8 | 75 | 79 | 79 |
 | auth_credential | 5 | 0 | 0 | 0 | 0 |
 | membership | 5 | 0 | 0 | 0 | 0 |
 | transfer | 5 | 0 | 0 | 0 | 0 |
-| do | 5 | 82.6 | 54.5 | 201 | 201 |
+| do | 5 | 127.6 | 83 | 238 | 238 |
 | worker_other | 5 | 0 | 0 | 0 | 0 |
-| client | 5 | 161.96 | 145 | 268 | 268 |
-| transport_client | 5 | 42.96 | 35.5 | 60.22 | 60.22 |
+| client | 5 | 321.38 | 270 | 476 | 476 |
+| transport_client | 5 | 55.18 | 48.5 | 101 | 101 |
 
 Observed colo/placement: {"WAW/local-WAW":5}.
 
@@ -76,16 +85,16 @@ Timing for restart: 5/5 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 5 | 57.4 | 47.5 | 101 | 101 |
-| auth_rate_limit | 5 | 18.4 | 18.31 | 20 | 20 |
-| auth_token | 5 | 17.8 | 18.25 | 19 | 19 |
+| worker | 5 | 213 | 162 | 427 | 427 |
+| auth_rate_limit | 5 | 59.6 | 59.5 | 63 | 63 |
+| auth_token | 5 | 111.8 | 59.5 | 324 | 324 |
 | auth_credential | 5 | 0 | 0 | 0 | 0 |
 | membership | 5 | 0 | 0 | 0 | 0 |
-| transfer | 5 | 17.4 | 7.06 | 60 | 60 |
+| transfer | 5 | 22.8 | 24.13 | 25 | 25 |
 | do | 5 | 0 | 0 | 0 | 0 |
-| worker_other | 5 | 3.8 | 4 | 4 | 4 |
-| client | 5 | 109.36 | 113 | 146 | 146 |
-| transport_client | 5 | 51.96 | 45.5 | 75 | 75 |
+| worker_other | 5 | 18.8 | 19.25 | 22 | 22 |
+| client | 5 | 254.34 | 198 | 476 | 476 |
+| transport_client | 5 | 41.34 | 36.5 | 51.5 | 51.5 |
 
 Observed colo/placement: {"WAW/local-WAW":5}.
 
@@ -93,16 +102,16 @@ Timing for warm_after_restart: 15/15 HTTP responses covered; 0 invalid residuals
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 15 | 52.6 | 48.83 | 90 | 90 |
-| auth_rate_limit | 15 | 21.6 | 18.35 | 44 | 44 |
-| auth_token | 15 | 19.67 | 18.45 | 34 | 34 |
+| worker | 15 | 148.67 | 147.6 | 173 | 173 |
+| auth_rate_limit | 15 | 62 | 61.75 | 80 | 80 |
+| auth_token | 15 | 63 | 62.5 | 92 | 92 |
 | auth_credential | 15 | 0 | 0 | 0 | 0 |
 | membership | 15 | 0 | 0 | 0 | 0 |
 | transfer | 15 | 0 | 0 | 0 | 0 |
-| do | 15 | 11.33 | 11.16 | 14 | 14 |
+| do | 15 | 23.67 | 23.25 | 32 | 32 |
 | worker_other | 15 | 0 | 0 | 0 | 0 |
-| client | 15 | 93.75 | 85.75 | 136.69 | 136.69 |
-| transport_client | 15 | 41.16 | 36.5 | 63.5 | 63.5 |
+| client | 15 | 186.71 | 185 | 203.43 | 203.43 |
+| transport_client | 15 | 38.04 | 34.75 | 54.5 | 54.5 |
 
 Observed colo/placement: {"WAW/local-WAW":15}.
 
@@ -111,225 +120,225 @@ Counters: restarts=5, restart_failures=0.
 - PASS no errors
 - PASS DO answered after every restart
 
-## http deployed: claims-uncontended (20261017-092604-cpab)
+## http deployed: claims-uncontended (20261017-142245-qkri)
 
 | | |
 |---|---|
-| **Run** | `20261017-092604-cpab` at 2026-10-17T09:26:04.781Z |
+| **Run** | `20261017-142245-qkri` at 2026-10-17T14:22:45.596Z |
 | **Harness** | 1.1.0 (schema 1) |
-| **Git** | 666ef43ea0 (dirty) |
-| **Tier / target** | http / deployed (tila-rel0111.breamcode.workers.dev, colo WAW, placement local-WAW) |
+| **Git** | b8ce4c6449 (dirty) |
+| **Tier / target** | http / deployed (tila-rel0120.breamcode.workers.dev, colo WAW, placement local-WAW) |
 | **Hardware** | Apple M3 Pro × 12, 36864.0 MiB RAM, darwin 25.6.0 arm64, node v24.19.0 |
 | **Load** | 6 participants, 1 principal(s), 30s after 5s warmup, cadence 500 ms |
 | **Params** | mode exclusive, groups 1, hold 0 ms, target tasks, steal every 5, sizes 1024/65536/1048576 B, seed 42 |
 
 #### claims-uncontended
 
-Per-participant resource: acquire (exclusive), renew x3, release. No contention; pure claim-path cost. 6 participant(s), 30s recorded.
+Per-participant resource: acquire (exclusive), renew x3, release. No contention; pure claim-path cost. 6 participant(s), 30.4s recorded.
 Dataset: resources=6, ttl_ms=30000, renews_per_cycle=3.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| acquire | 72 | 72 | 0 | 0 | 0 | 2.4 | 146.6 | 313.33 | 360.1 | 360.1 |
-| release | 72 | 72 | 0 | 0 | 0 | 2.4 | 150 | 183 | 482.63 | 482.63 |
-| renew | 216 | 216 | 0 | 0 | 0 | 7.2 | 143.5 | 189 | 396 | 553.76 |
-| **total** | 360 | 360 | 0 | 0 | 0 | 12 | 146.08 | 191 | 396 | 553.76 |
+| acquire | 72 | 72 | 0 | 0 | 0 | 2.37 | 232.67 | 584 | 754.55 | 754.55 |
+| release | 71 | 71 | 0 | 0 | 0 | 2.33 | 225.75 | 438 | 584 | 584.69 |
+| renew | 215 | 215 | 0 | 0 | 0 | 7.07 | 224.44 | 284 | 536 | 762.82 |
+| **total** | 358 | 358 | 0 | 0 | 0 | 11.77 | 225.89 | 432.8 | 664 | 762.82 |
 
 Timing for acquire: 72/72 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 72 | 118.21 | 106.5 | 274 | 281 |
-| auth_rate_limit | 72 | 37.24 | 26.04 | 184.5 | 187 |
-| auth_token | 72 | 30.33 | 25.45 | 38.5 | 185 |
+| worker | 72 | 216.25 | 194.8 | 354 | 610 |
+| auth_rate_limit | 72 | 66.9 | 66.45 | 83.5 | 94 |
+| auth_token | 72 | 73.01 | 65.36 | 87 | 460 |
 | auth_credential | 72 | 0 | 0 | 0 | 0 |
 | membership | 72 | 0 | 0 | 0 | 0 |
-| transfer | 72 | 18.56 | 19.25 | 32.25 | 39 |
-| do | 72 | 32.07 | 30.46 | 43.5 | 44 |
-| worker_other | 72 | 0.01 | 0 | 0 | 1 |
-| client | 72 | 159.42 | 146.6 | 313.33 | 360.1 |
-| transport_client | 72 | 41.22 | 39.06 | 50.5 | 125 |
+| transfer | 72 | 25.31 | 21.36 | 36.5 | 193 |
+| do | 72 | 50.99 | 37.64 | 154 | 288 |
+| worker_other | 72 | 0.04 | 0 | 0 | 3 |
+| client | 72 | 272.04 | 232.67 | 584 | 754.55 |
+| transport_client | 72 | 55.79 | 35.58 | 85 | 552 |
 
 Observed colo/placement: {"WAW/local-WAW":72}.
 
-Timing for release: 72/72 HTTP responses covered; 0 invalid residuals.
+Timing for release: 71/71 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 72 | 108.29 | 111.8 | 145 | 158 |
-| auth_rate_limit | 72 | 28.78 | 27.13 | 48.75 | 55 |
-| auth_token | 72 | 30.89 | 27.16 | 53.75 | 102 |
-| auth_credential | 72 | 0 | 0 | 0 | 0 |
-| membership | 72 | 0 | 0 | 0 | 0 |
-| transfer | 72 | 18.03 | 20.25 | 33.25 | 36 |
-| do | 72 | 30.57 | 30.11 | 37.5 | 43 |
-| worker_other | 72 | 0.03 | 0 | 0 | 1 |
-| client | 72 | 150.29 | 150 | 183 | 482.63 |
-| transport_client | 72 | 41.99 | 37.72 | 45.88 | 324 |
+| worker | 71 | 208.27 | 190.83 | 396 | 472 |
+| auth_rate_limit | 71 | 71.17 | 65.13 | 123 | 193 |
+| auth_token | 71 | 77.66 | 64.83 | 268 | 300 |
+| auth_credential | 71 | 0 | 0 | 0 | 0 |
+| membership | 71 | 0 | 0 | 0 | 0 |
+| transfer | 71 | 23.55 | 21.15 | 33.25 | 154 |
+| do | 71 | 35.86 | 36.5 | 40.83 | 41 |
+| worker_other | 71 | 0.03 | 0 | 0 | 1 |
+| client | 71 | 248.42 | 225.75 | 438 | 584 |
+| transport_client | 71 | 40.15 | 34.14 | 44.5 | 396 |
 
-Observed colo/placement: {"WAW/local-WAW":72}.
+Observed colo/placement: {"WAW/local-WAW":71}.
 
-Timing for renew: 216/216 HTTP responses covered; 0 invalid residuals.
+Timing for renew: 215/215 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 216 | 106.68 | 105.9 | 142 | 165 |
-| auth_rate_limit | 216 | 28.72 | 25.33 | 51.25 | 75 |
-| auth_token | 216 | 27.63 | 25.27 | 44.75 | 60.5 |
-| auth_credential | 216 | 0 | 0 | 0 | 0 |
-| membership | 216 | 0 | 0 | 0 | 0 |
-| transfer | 216 | 18.9 | 20.08 | 33.25 | 37.75 |
-| do | 216 | 31.38 | 30.29 | 40.56 | 44.5 |
-| worker_other | 216 | 0.05 | 0 | 0 | 1.03 |
-| client | 216 | 149.16 | 143.5 | 189 | 396 |
-| transport_client | 216 | 42.48 | 36.16 | 63.5 | 292 |
+| worker | 215 | 196.56 | 189.68 | 227.33 | 406 |
+| auth_rate_limit | 215 | 69.01 | 65.12 | 79.83 | 274 |
+| auth_token | 215 | 66.76 | 65.22 | 79.5 | 91.5 |
+| auth_credential | 215 | 0 | 0 | 0 | 0 |
+| membership | 215 | 0 | 0 | 0 | 0 |
+| transfer | 215 | 24.14 | 21.21 | 36.75 | 63.5 |
+| do | 215 | 36.59 | 37.17 | 41.79 | 45.25 |
+| worker_other | 215 | 0.05 | 0 | 0 | 1.03 |
+| client | 215 | 238.02 | 224.44 | 284 | 536 |
+| transport_client | 215 | 41.46 | 34.36 | 63.25 | 338 |
 
-Observed colo/placement: {"WAW/local-WAW":216}.
+Observed colo/placement: {"WAW/local-WAW":215}.
 
-Counters: missed_cadence_deadlines=1.
+Counters: missed_cadence_deadlines=10.
 
 - PASS no errors
 - PASS no conflicts on disjoint resources
 - PASS no stale fences
 
-## http deployed: claims-contended (20261017-092522-jmdb)
+## http deployed: claims-contended (20261017-142202-fttp)
 
 | | |
 |---|---|
-| **Run** | `20261017-092522-jmdb` at 2026-10-17T09:25:22.519Z |
+| **Run** | `20261017-142202-fttp` at 2026-10-17T14:22:02.377Z |
 | **Harness** | 1.1.0 (schema 1) |
-| **Git** | 666ef43ea0 (dirty) |
-| **Tier / target** | http / deployed (tila-rel0111.breamcode.workers.dev, colo WAW, placement local-WAW) |
+| **Git** | b8ce4c6449 (dirty) |
+| **Tier / target** | http / deployed (tila-rel0120.breamcode.workers.dev, colo WAW, placement local-WAW) |
 | **Hardware** | Apple M3 Pro × 12, 36864.0 MiB RAM, darwin 25.6.0 arm64, node v24.19.0 |
 | **Load** | 24 participants, 1 principal(s), 30s after 5s warmup |
 | **Params** | mode owner, groups 1, hold 0 ms, target tasks, steal every 5, sizes 1024/65536/1048576 B, seed 42 |
 
 #### claims-contended
 
-Participants contend for one or more hot resources: acquire, hold, release. Reports conflicts, takeovers and fence monotonicity. 24 participant(s), 30.3s recorded.
+Participants contend for one or more hot resources: acquire, hold, release. Reports conflicts, takeovers and fence monotonicity. 24 participant(s), 30.6s recorded.
 Dataset: hot_resources=1, mode="owner", hold_ms=0, ttl_ms=5000, principals=1.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| acquire | 1571 | 1571 | 0 | 0 | 0 | 51.82 | 218.29 | 357.14 | 612 | 875.7 |
-| release | 1587 | 1 | 0 | 1586 | 0 | 52.34 | 209.2 | 337.71 | 546 | 758.97 |
-| **total** | 3158 | 1572 | 0 | 1586 | 0 | 104.16 | 214.59 | 348 | 570 | 875.7 |
+| acquire | 773 | 773 | 0 | 0 | 0 | 25.28 | 430.9 | 728 | 984 | 1201.34 |
+| release | 782 | 2 | 0 | 780 | 0 | 25.57 | 429.57 | 713.33 | 930.67 | 1360 |
+| **total** | 1555 | 775 | 0 | 780 | 0 | 50.85 | 430.41 | 717.82 | 936 | 1360 |
 
-Timing for acquire: 1571/1571 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 1571 | 190.32 | 182.25 | 282.89 | 341.2 |
-| auth_rate_limit | 1571 | 63.24 | 60.14 | 109 | 168.5 |
-| auth_token | 1571 | 65.84 | 64.43 | 96.43 | 166 |
-| auth_credential | 1571 | 0 | 0 | 0 | 0 |
-| membership | 1571 | 0 | 0 | 0 | 0 |
-| transfer | 1571 | 22.38 | 18.39 | 50.92 | 99 |
-| do | 1571 | 38.7 | 34.58 | 65.1 | 110.5 |
-| worker_other | 1571 | 0.15 | 0 | 1.02 | 2.03 |
-| client | 1571 | 236.3 | 218.29 | 357.14 | 612 |
-| transport_client | 1571 | 45.98 | 33.22 | 58.5 | 433.33 |
-
-Observed colo/placement: {"WAW/local-WAW":1571}.
-
-Timing for release: 1587/1587 HTTP responses covered; 0 invalid residuals.
+Timing for acquire: 773/773 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 1587 | 178.07 | 172.88 | 274.57 | 340.4 |
-| auth_rate_limit | 1587 | 61.48 | 58.82 | 103.25 | 161 |
-| auth_token | 1587 | 63.76 | 63.52 | 90.54 | 150.33 |
-| auth_credential | 1587 | 0 | 0 | 0 | 0 |
-| membership | 1587 | 0 | 0 | 0 | 0 |
-| transfer | 1587 | 22.74 | 18.34 | 53.17 | 114.75 |
-| do | 1587 | 29.87 | 29.32 | 66.5 | 122.75 |
-| worker_other | 1587 | 0.21 | 0 | 1.03 | 2.06 |
-| client | 1587 | 220.65 | 209.2 | 337.71 | 546 |
-| transport_client | 1587 | 42.58 | 33.8 | 49.25 | 341.6 |
+| worker | 773 | 417.22 | 392.71 | 637.78 | 788 |
+| auth_rate_limit | 773 | 160.57 | 150.77 | 251 | 452 |
+| auth_token | 773 | 166.23 | 161.41 | 234 | 396 |
+| auth_credential | 773 | 0 | 0 | 0 | 0 |
+| membership | 773 | 0 | 0 | 0 | 0 |
+| transfer | 773 | 35.31 | 25.01 | 92.5 | 222 |
+| do | 773 | 54.94 | 44.34 | 116.33 | 166 |
+| worker_other | 773 | 0.17 | 0 | 1.02 | 2.05 |
+| client | 773 | 464.02 | 430.9 | 728 | 984 |
+| transport_client | 773 | 46.8 | 32.53 | 58.75 | 518 |
 
-Observed colo/placement: {"WAW/local-WAW":1587}.
+Observed colo/placement: {"WAW/local-WAW":773}.
 
-Counters: takeovers=118, fence_reorders_observed=101, journal_fence_regressions=0, journal_acquires_audited=1835.
+Timing for release: 782/782 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 782 | 407.76 | 385.63 | 626.67 | 776 |
+| auth_rate_limit | 782 | 161.91 | 152.6 | 274 | 428 |
+| auth_token | 782 | 164.9 | 162.19 | 226 | 372 |
+| auth_credential | 782 | 0 | 0 | 0 | 0 |
+| membership | 782 | 0 | 0 | 0 | 0 |
+| transfer | 782 | 35.83 | 25.14 | 99.5 | 203.6 |
+| do | 782 | 44.8 | 38.63 | 94.5 | 162 |
+| worker_other | 782 | 0.32 | 0 | 2.03 | 3.06 |
+| client | 782 | 463.18 | 429.57 | 713.33 | 930.67 |
+| transport_client | 782 | 55.42 | 32.98 | 276 | 516 |
+
+Observed colo/placement: {"WAW/local-WAW":782}.
+
+Counters: takeovers=76, fence_reorders_observed=132, journal_fence_regressions=0, journal_acquires_audited=912.
 
 - PASS no errors
-- PASS journal fences never regress per resource (0 regressions in 1835 acquires)
+- PASS journal fences never regress per resource (0 regressions in 912 acquires)
 - PASS outcome classes sum to ops
-- PASS owner mode: same-principal takeovers observed (118 takeovers)
+- PASS owner mode: same-principal takeovers observed (76 takeovers)
 
-## http deployed: all (20261017-091943-dtxx)
+## http deployed: all (20261017-141552-cq3s)
 
 | | |
 |---|---|
-| **Run** | `20261017-091943-dtxx` at 2026-10-17T09:19:43.882Z |
+| **Run** | `20261017-141552-cq3s` at 2026-10-17T14:15:52.219Z |
 | **Harness** | 1.1.0 (schema 1) |
-| **Git** | 666ef43ea0 (dirty) |
-| **Tier / target** | http / deployed (tila-rel0111.breamcode.workers.dev, colo WAW, placement local-WAW) |
+| **Git** | b8ce4c6449 (dirty) |
+| **Tier / target** | http / deployed (tila-rel0120.breamcode.workers.dev, colo WAW, placement local-WAW) |
 | **Hardware** | Apple M3 Pro × 12, 36864.0 MiB RAM, darwin 25.6.0 arm64, node v24.19.0 |
 | **Load** | 8 participants, 1 principal(s), 30s after 5s warmup |
 | **Params** | mode exclusive, groups 1, hold 0 ms, target tasks, steal every 5, sizes 1024/65536/1048576 B, seed 42 |
 
 #### claims-uncontended
 
-Per-participant resource: acquire (exclusive), renew x3, release. No contention; pure claim-path cost. 8 participant(s), 30.5s recorded.
+Per-participant resource: acquire (exclusive), renew x3, release. No contention; pure claim-path cost. 8 participant(s), 31.4s recorded.
 Dataset: resources=8, ttl_ms=30000, renews_per_cycle=3.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| acquire | 344 | 344 | 0 | 0 | 0 | 11.27 | 129 | 210 | 452 | 635.51 |
-| release | 352 | 352 | 0 | 0 | 0 | 11.53 | 127.87 | 187 | 428 | 564.54 |
-| renew | 1046 | 1046 | 0 | 0 | 0 | 34.28 | 128.17 | 194.57 | 460 | 655.66 |
-| **total** | 1742 | 1742 | 0 | 0 | 0 | 57.08 | 128.25 | 196.13 | 452 | 655.66 |
+| acquire | 180 | 180 | 0 | 0 | 0 | 5.73 | 242.53 | 412 | 616 | 1020.29 |
+| release | 188 | 188 | 0 | 0 | 0 | 5.98 | 240.77 | 442 | 616 | 808.35 |
+| renew | 546 | 546 | 0 | 0 | 0 | 17.37 | 243.94 | 436 | 644 | 776.85 |
+| **total** | 914 | 914 | 0 | 0 | 0 | 29.07 | 242.98 | 436 | 616 | 1020.29 |
 
-Timing for acquire: 344/344 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 344 | 101.16 | 95.74 | 160.5 | 300 |
-| auth_rate_limit | 344 | 23.26 | 20.39 | 40.75 | 89 |
-| auth_token | 344 | 23.64 | 20.45 | 39.13 | 106.5 |
-| auth_credential | 344 | 0 | 0 | 0 | 0 |
-| membership | 344 | 0 | 0 | 0 | 0 |
-| transfer | 344 | 20.36 | 19.25 | 35.25 | 67 |
-| do | 344 | 33.82 | 30.34 | 42.83 | 97 |
-| worker_other | 344 | 0.08 | 0 | 1.01 | 1.03 |
-| client | 344 | 143.35 | 129 | 210 | 452 |
-| transport_client | 344 | 42.19 | 32.68 | 48.83 | 340 |
-
-Observed colo/placement: {"WAW/local-WAW":344}.
-
-Timing for release: 352/352 HTTP responses covered; 0 invalid residuals.
+Timing for acquire: 180/180 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 352 | 98.93 | 94.5 | 139.5 | 234 |
-| auth_rate_limit | 352 | 22.62 | 20.25 | 36.25 | 67 |
-| auth_token | 352 | 23.82 | 21.09 | 38.83 | 89 |
-| auth_credential | 352 | 0 | 0 | 0 | 0 |
-| membership | 352 | 0 | 0 | 0 | 0 |
-| transfer | 352 | 20.83 | 20.14 | 34.88 | 83 |
-| do | 352 | 31.59 | 30.19 | 41.25 | 60.5 |
-| worker_other | 352 | 0.07 | 0 | 1.01 | 1.03 |
-| client | 352 | 136.49 | 127.87 | 187 | 428 |
-| transport_client | 352 | 37.56 | 31.64 | 46.75 | 308 |
+| worker | 180 | 225.21 | 209.57 | 340 | 460 |
+| auth_rate_limit | 180 | 80.33 | 70.59 | 127 | 300 |
+| auth_token | 180 | 73.48 | 71.63 | 93.86 | 99.67 |
+| auth_credential | 180 | 0 | 0 | 0 | 0 |
+| membership | 180 | 0 | 0 | 0 | 0 |
+| transfer | 180 | 28.52 | 23.16 | 44.5 | 142 |
+| do | 180 | 42.82 | 38.33 | 53.75 | 197 |
+| worker_other | 180 | 0.07 | 0 | 1 | 1 |
+| client | 180 | 266.46 | 242.53 | 412 | 616 |
+| transport_client | 180 | 41.26 | 32.13 | 49.75 | 324 |
 
-Observed colo/placement: {"WAW/local-WAW":352}.
+Observed colo/placement: {"WAW/local-WAW":180}.
 
-Timing for renew: 1046/1046 HTTP responses covered; 0 invalid residuals.
+Timing for release: 188/188 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 1046 | 99.4 | 95.84 | 142.25 | 203 |
-| auth_rate_limit | 1046 | 22.89 | 20.23 | 38.13 | 79 |
-| auth_token | 1046 | 22.8 | 20.42 | 37.5 | 56.5 |
-| auth_credential | 1046 | 0 | 0 | 0 | 0 |
-| membership | 1046 | 0 | 0 | 0 | 0 |
-| transfer | 1046 | 21.66 | 21.19 | 36.83 | 80.5 |
-| do | 1046 | 31.95 | 30.26 | 39.84 | 80.5 |
-| worker_other | 1046 | 0.09 | 0 | 1.01 | 1.03 |
-| client | 1046 | 138.63 | 128.17 | 194.57 | 460 |
-| transport_client | 1046 | 39.23 | 31.97 | 49.5 | 334 |
+| worker | 188 | 223.05 | 207.18 | 350 | 482 |
+| auth_rate_limit | 188 | 76.3 | 69.5 | 99.5 | 326 |
+| auth_token | 188 | 75.65 | 72.06 | 94.5 | 198 |
+| auth_credential | 188 | 0 | 0 | 0 | 0 |
+| membership | 188 | 0 | 0 | 0 | 0 |
+| transfer | 188 | 28.93 | 23.08 | 44.5 | 170 |
+| do | 188 | 42.03 | 38.16 | 50.25 | 174 |
+| worker_other | 188 | 0.15 | 0 | 1 | 8.13 |
+| client | 188 | 265.38 | 240.77 | 442 | 616 |
+| transport_client | 188 | 42.32 | 32.66 | 62.5 | 396 |
 
-Observed colo/placement: {"WAW/local-WAW":1046}.
+Observed colo/placement: {"WAW/local-WAW":188}.
+
+Timing for renew: 546/546 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 546 | 224.98 | 211.1 | 311 | 524 |
+| auth_rate_limit | 546 | 77.28 | 71.7 | 96.6 | 246 |
+| auth_token | 546 | 78.86 | 72.72 | 99.17 | 308 |
+| auth_credential | 546 | 0 | 0 | 0 | 0 |
+| membership | 546 | 0 | 0 | 0 | 0 |
+| transfer | 546 | 28.68 | 23.4 | 45.21 | 131 |
+| do | 546 | 40.11 | 37.99 | 51.13 | 123 |
+| worker_other | 546 | 0.05 | 0 | 0 | 1.03 |
+| client | 546 | 266.5 | 243.94 | 436 | 644 |
+| transport_client | 546 | 41.52 | 31.98 | 52.25 | 340 |
+
+Observed colo/placement: {"WAW/local-WAW":546}.
 
 
 - PASS no errors
@@ -338,291 +347,291 @@ Observed colo/placement: {"WAW/local-WAW":1046}.
 
 #### claims-contended
 
-Participants contend for one or more hot resources: acquire, hold, release. Reports conflicts, takeovers and fence monotonicity. 8 participant(s), 30.4s recorded.
+Participants contend for one or more hot resources: acquire, hold, release. Reports conflicts, takeovers and fence monotonicity. 8 participant(s), 30.3s recorded.
 Dataset: hot_resources=1, mode="exclusive", hold_ms=0, ttl_ms=5000, principals=1.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| acquire | 1777 | 189 | 1588 | 0 | 0 | 58.49 | 112.06 | 179.25 | 316 | 751.32 |
-| release | 190 | 190 | 0 | 0 | 0 | 6.25 | 127.3 | 211 | 460 | 491.8 |
-| **total** | 1967 | 379 | 1588 | 0 | 0 | 64.74 | 114.02 | 180.22 | 332 | 751.32 |
+| acquire | 858 | 106 | 752 | 0 | 0 | 28.3 | 224.67 | 388 | 644 | 828.65 |
+| release | 107 | 107 | 0 | 0 | 0 | 3.53 | 235.14 | 370 | 500 | 566.1 |
+| **total** | 965 | 213 | 752 | 0 | 0 | 31.83 | 226.03 | 380 | 616 | 828.65 |
 
-Timing for acquire: 1777/1777 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 1777 | 82.54 | 77.91 | 135.41 | 196.67 |
-| auth_rate_limit | 1777 | 27.82 | 25.01 | 47.79 | 97 |
-| auth_token | 1777 | 27.68 | 25.22 | 44.68 | 104.5 |
-| auth_credential | 1777 | 0 | 0 | 0 | 0 |
-| membership | 1777 | 0 | 0 | 0 | 0 |
-| transfer | 1777 | 13.3 | 8.15 | 32.5 | 55.17 |
-| do | 1777 | 13.66 | 8.21 | 32.98 | 39.3 |
-| worker_other | 1777 | 0.08 | 0 | 1.01 | 2.01 |
-| client | 1777 | 120.38 | 112.06 | 179.25 | 316 |
-| transport_client | 1777 | 37.84 | 32.17 | 45.77 | 186 |
-
-Observed colo/placement: {"WAW/local-WAW":1777}.
-
-Timing for release: 190/190 HTTP responses covered; 0 invalid residuals.
+Timing for acquire: 858/858 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 190 | 98.4 | 93.57 | 139 | 230 |
-| auth_rate_limit | 190 | 28.89 | 26.1 | 45.83 | 134 |
-| auth_token | 190 | 30.06 | 27.4 | 47.75 | 133 |
-| auth_credential | 190 | 0 | 0 | 0 | 0 |
-| membership | 190 | 0 | 0 | 0 | 0 |
-| transfer | 190 | 8.59 | 7.02 | 13.19 | 65 |
-| do | 190 | 30.85 | 29.42 | 37.38 | 93 |
-| worker_other | 190 | 0.01 | 0 | 0 | 1 |
-| client | 190 | 137.08 | 127.3 | 211 | 460 |
-| transport_client | 190 | 38.68 | 31.73 | 44.5 | 364 |
+| worker | 858 | 210.94 | 192.25 | 325 | 566.67 |
+| auth_rate_limit | 858 | 78.19 | 71.55 | 102.83 | 276 |
+| auth_token | 858 | 82.51 | 72.4 | 117.75 | 422 |
+| auth_credential | 858 | 0 | 0 | 0 | 0 |
+| membership | 858 | 0 | 0 | 0 | 0 |
+| transfer | 858 | 25.34 | 21.2 | 38.93 | 127 |
+| do | 858 | 24.76 | 20.4 | 39.58 | 50.63 |
+| worker_other | 858 | 0.15 | 0 | 1.01 | 2.03 |
+| client | 858 | 248.02 | 224.67 | 388 | 644 |
+| transport_client | 858 | 37.09 | 31.59 | 42.25 | 316 |
 
-Observed colo/placement: {"WAW/local-WAW":190}.
+Observed colo/placement: {"WAW/local-WAW":858}.
 
-Counters: takeovers=0, fence_reorders_observed=0, journal_fence_regressions=0, journal_acquires_audited=213.
+Timing for release: 107/107 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 107 | 215.34 | 202 | 300 | 364 |
+| auth_rate_limit | 107 | 74.82 | 69.91 | 119 | 134 |
+| auth_token | 107 | 79.08 | 74.33 | 109 | 190 |
+| auth_credential | 107 | 0 | 0 | 0 | 0 |
+| membership | 107 | 0 | 0 | 0 | 0 |
+| transfer | 107 | 21.08 | 20.31 | 26.38 | 35.5 |
+| do | 107 | 40.32 | 36.94 | 46.5 | 138 |
+| worker_other | 107 | 0.03 | 0 | 0 | 1 |
+| client | 107 | 253.02 | 235.14 | 370 | 500 |
+| transport_client | 107 | 37.69 | 31.25 | 40.25 | 186 |
+
+Observed colo/placement: {"WAW/local-WAW":107}.
+
+Counters: takeovers=0, fence_reorders_observed=0, journal_fence_regressions=0, journal_acquires_audited=124.
 
 - PASS no errors
-- PASS journal fences never regress per resource (0 regressions in 213 acquires)
+- PASS journal fences never regress per resource (0 regressions in 124 acquires)
 - PASS outcome classes sum to ops
 
 #### fenced-writes
 
-Fenced task updates (owner-mode claims) with a thief forcing stale-fence retries, or CAS record writes between paired participants. 8 participant(s), 30.2s recorded.
+Fenced task updates (owner-mode claims) with a thief forcing stale-fence retries, or CAS record writes between paired participants. 8 participant(s), 30.4s recorded.
 Dataset: target="tasks", tasks=7, records=0, thief=true, steal_every=5, ttl_ms=30000.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| reacquire | 172 | 172 | 0 | 0 | 0 | 5.69 | 131.13 | 212.5 | 436 | 596.77 |
-| steal | 183 | 183 | 0 | 0 | 0 | 6.05 | 129.27 | 191 | 292 | 355.3 |
-| update | 1391 | 1220 | 0 | 171 | 0 | 46 | 128.97 | 191 | 256.67 | 436.48 |
-| **total** | 1746 | 1575 | 0 | 171 | 0 | 57.74 | 129.19 | 192.17 | 260 | 596.77 |
+| reacquire | 97 | 97 | 0 | 0 | 0 | 3.2 | 234 | 388 | 600 | 604.66 |
+| steal | 105 | 105 | 0 | 0 | 0 | 3.46 | 239 | 382 | 568 | 682.01 |
+| update | 722 | 625 | 0 | 97 | 0 | 23.79 | 237.09 | 387 | 636 | 731.46 |
+| **total** | 924 | 827 | 0 | 97 | 0 | 30.44 | 236.95 | 386 | 628 | 731.46 |
 
-Timing for reacquire: 172/172 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 172 | 100.89 | 96.43 | 142 | 183.33 |
-| auth_rate_limit | 172 | 25.21 | 21.34 | 43.25 | 107 |
-| auth_token | 172 | 23.46 | 21.44 | 40.25 | 48.5 |
-| auth_credential | 172 | 0 | 0 | 0 | 0 |
-| membership | 172 | 0 | 0 | 0 | 0 |
-| transfer | 172 | 19.69 | 18.25 | 36.75 | 73 |
-| do | 172 | 32.42 | 31.02 | 43.5 | 71 |
-| worker_other | 172 | 0.1 | 0 | 1.02 | 1.03 |
-| client | 172 | 142.66 | 131.13 | 212.5 | 436 |
-| transport_client | 172 | 41.77 | 32.34 | 51.25 | 348 |
-
-Observed colo/placement: {"WAW/local-WAW":172}.
-
-Timing for steal: 183/183 HTTP responses covered; 0 invalid residuals.
+Timing for reacquire: 97/97 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 183 | 97.25 | 95 | 146 | 218 |
-| auth_rate_limit | 183 | 24.03 | 20.22 | 42.5 | 129 |
-| auth_token | 183 | 22.69 | 21.09 | 39.17 | 55.5 |
-| auth_credential | 183 | 0 | 0 | 0 | 0 |
-| membership | 183 | 0 | 0 | 0 | 0 |
-| transfer | 183 | 18.51 | 17.25 | 40.25 | 79 |
-| do | 183 | 31.96 | 30.33 | 42.17 | 83 |
-| worker_other | 183 | 0.07 | 0 | 1 | 1.03 |
-| client | 183 | 134.52 | 129.27 | 191 | 292 |
-| transport_client | 183 | 37.26 | 33.66 | 48.83 | 109 |
+| worker | 97 | 219.05 | 200.67 | 364 | 552 |
+| auth_rate_limit | 97 | 74.5 | 67.55 | 101 | 260 |
+| auth_token | 97 | 76.38 | 67.44 | 101.5 | 436 |
+| auth_credential | 97 | 0 | 0 | 0 | 0 |
+| membership | 97 | 0 | 0 | 0 | 0 |
+| transfer | 97 | 26.42 | 22.32 | 44.25 | 78 |
+| do | 97 | 41.73 | 37.36 | 52.5 | 202 |
+| worker_other | 97 | 0.01 | 0 | 0 | 1 |
+| client | 97 | 253.85 | 234 | 388 | 600 |
+| transport_client | 97 | 34.8 | 33.12 | 50.25 | 53.5 |
 
-Observed colo/placement: {"WAW/local-WAW":183}.
+Observed colo/placement: {"WAW/local-WAW":97}.
 
-Timing for update: 1391/1391 HTTP responses covered; 0 invalid residuals.
+Timing for steal: 105/105 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 1391 | 98.83 | 95.92 | 149.56 | 214 |
-| auth_rate_limit | 1391 | 24.19 | 20.5 | 42.81 | 98.5 |
-| auth_token | 1391 | 23.63 | 21.07 | 40.25 | 97 |
-| auth_credential | 1391 | 0 | 0 | 0 | 0 |
-| membership | 1391 | 0 | 0 | 0 | 0 |
-| transfer | 1391 | 19.55 | 19.3 | 36.45 | 60.88 |
-| do | 1391 | 31.42 | 30.4 | 42.06 | 81.67 |
-| worker_other | 1391 | 0.05 | 0 | 0 | 1.03 |
-| client | 1391 | 133.49 | 128.97 | 191 | 256.67 |
-| transport_client | 1391 | 34.65 | 32.4 | 45.54 | 61.5 |
+| worker | 105 | 214.15 | 203.14 | 338 | 356 |
+| auth_rate_limit | 105 | 71.5 | 67.59 | 91 | 186 |
+| auth_token | 105 | 74.51 | 70.58 | 93.75 | 162 |
+| auth_credential | 105 | 0 | 0 | 0 | 0 |
+| membership | 105 | 0 | 0 | 0 | 0 |
+| transfer | 105 | 29.29 | 22.32 | 45.75 | 158 |
+| do | 105 | 38.8 | 37.66 | 45.5 | 49.5 |
+| worker_other | 105 | 0.06 | 0 | 1 | 1 |
+| client | 105 | 258.06 | 239 | 382 | 568 |
+| transport_client | 105 | 43.91 | 32.76 | 55.5 | 356 |
 
-Observed colo/placement: {"WAW/local-WAW":1391}.
+Observed colo/placement: {"WAW/local-WAW":105}.
 
-Counters: steals=214, reacquires=199.
+Timing for update: 722/722 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 722 | 218.86 | 203.19 | 337.33 | 525.33 |
+| auth_rate_limit | 722 | 75.37 | 68.32 | 97 | 260 |
+| auth_token | 722 | 75.34 | 69.66 | 95.75 | 214 |
+| auth_credential | 722 | 0 | 0 | 0 | 0 |
+| membership | 722 | 0 | 0 | 0 | 0 |
+| transfer | 722 | 29.12 | 22.48 | 44.58 | 127.67 |
+| do | 722 | 38.94 | 38.23 | 47.92 | 134 |
+| worker_other | 722 | 0.09 | 0 | 1.01 | 1.03 |
+| client | 722 | 257.39 | 237.09 | 387 | 636 |
+| transport_client | 722 | 38.52 | 31.98 | 49.13 | 332 |
+
+Observed colo/placement: {"WAW/local-WAW":722}.
+
+Counters: steals=121, reacquires=110.
 
 - PASS no errors
 - PASS stale fences were rejected
 
 #### presence-signals
 
-Presence heartbeat, then a participant-targeted signal to a random peer, then inbox read and acknowledgement of every pending bench signal. 8 participant(s), 30.4s recorded.
+Presence heartbeat, then a participant-targeted signal to a random peer, then inbox read and acknowledgement of every pending bench signal. 8 participant(s), 31.4s recorded.
 Dataset: participants=8, signal_ttl_ms=60000.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| ack | 483 | 483 | 0 | 0 | 0 | 15.91 | 118.81 | 190.5 | 508 | 653.02 |
-| heartbeat | 482 | 482 | 0 | 0 | 0 | 15.88 | 120.16 | 184.4 | 436 | 748.54 |
-| inbox | 484 | 484 | 0 | 0 | 0 | 15.94 | 94.06 | 158 | 552 | 661.69 |
-| send | 483 | 483 | 0 | 0 | 0 | 15.91 | 120.87 | 191.33 | 420 | 699.77 |
-| **total** | 1932 | 1932 | 0 | 0 | 0 | 63.65 | 115.7 | 183.67 | 430 | 748.54 |
+| ack | 241 | 241 | 0 | 0 | 0 | 7.67 | 240.86 | 385.33 | 552 | 804.48 |
+| heartbeat | 238 | 238 | 0 | 0 | 0 | 7.57 | 242.21 | 460 | 628 | 673.59 |
+| inbox | 241 | 241 | 0 | 0 | 0 | 7.67 | 207.33 | 358 | 520 | 597.66 |
+| send | 239 | 239 | 0 | 0 | 0 | 7.61 | 248.9 | 430 | 648 | 744.64 |
+| **total** | 959 | 959 | 0 | 0 | 0 | 30.52 | 237.26 | 410 | 596 | 804.48 |
 
-Timing for ack: 483/483 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 483 | 92.54 | 86.13 | 143.33 | 234 |
-| auth_rate_limit | 483 | 24.52 | 21.08 | 44.75 | 91 |
-| auth_token | 483 | 23.29 | 21.16 | 38.88 | 83 |
-| auth_credential | 483 | 0 | 0 | 0 | 0 |
-| membership | 483 | 0 | 0 | 0 | 0 |
-| transfer | 483 | 16.28 | 14.03 | 30.32 | 85 |
-| do | 483 | 28.41 | 27.37 | 33.45 | 37.75 |
-| worker_other | 483 | 0.04 | 0 | 0 | 1.03 |
-| client | 483 | 132.01 | 118.81 | 190.5 | 508 |
-| transport_client | 483 | 39.47 | 31.73 | 49.75 | 356 |
-
-Observed colo/placement: {"WAW/local-WAW":483}.
-
-Timing for heartbeat: 482/482 HTTP responses covered; 0 invalid residuals.
+Timing for ack: 241/241 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 482 | 90.97 | 87.09 | 125 | 181 |
-| auth_rate_limit | 482 | 23.96 | 21.27 | 41.17 | 85.5 |
-| auth_token | 482 | 23.98 | 21.2 | 41.5 | 89 |
-| auth_credential | 482 | 0 | 0 | 0 | 0 |
-| membership | 482 | 0 | 0 | 0 | 0 |
-| transfer | 482 | 16.03 | 13.16 | 30.16 | 38.5 |
-| do | 482 | 26.95 | 26.43 | 31.08 | 37.5 |
-| worker_other | 482 | 0.04 | 0 | 0 | 1 |
-| client | 482 | 129.59 | 120.16 | 184.4 | 436 |
-| transport_client | 482 | 38.62 | 32.15 | 47.5 | 322 |
+| worker | 241 | 221.53 | 208.22 | 345 | 420 |
+| auth_rate_limit | 241 | 76.08 | 71.53 | 101 | 205 |
+| auth_token | 241 | 78.42 | 73.46 | 111 | 265.33 |
+| auth_credential | 241 | 0 | 0 | 0 | 0 |
+| membership | 241 | 0 | 0 | 0 | 0 |
+| transfer | 241 | 30.7 | 22.42 | 67.5 | 218 |
+| do | 241 | 36.31 | 35.41 | 43.17 | 52.5 |
+| worker_other | 241 | 0.03 | 0 | 0 | 1 |
+| client | 241 | 259.55 | 240.86 | 385.33 | 552 |
+| transport_client | 241 | 38.02 | 31.74 | 43.75 | 324 |
 
-Observed colo/placement: {"WAW/local-WAW":482}.
+Observed colo/placement: {"WAW/local-WAW":241}.
 
-Timing for inbox: 484/484 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 484 | 64.75 | 58.96 | 100.5 | 154 |
-| auth_rate_limit | 484 | 24.1 | 21.09 | 41.88 | 91 |
-| auth_token | 484 | 23.42 | 21.13 | 38.5 | 80.33 |
-| auth_credential | 484 | 0 | 0 | 0 | 0 |
-| membership | 484 | 0 | 0 | 0 | 0 |
-| transfer | 484 | 0 | 0 | 0 | 0 |
-| do | 484 | 17.23 | 14.14 | 31.03 | 93 |
-| worker_other | 484 | 0 | 0 | 0 | 0 |
-| client | 484 | 105.24 | 94.06 | 158 | 552 |
-| transport_client | 484 | 40.49 | 32.6 | 47.88 | 492 |
-
-Observed colo/placement: {"WAW/local-WAW":484}.
-
-Timing for send: 483/483 HTTP responses covered; 0 invalid residuals.
+Timing for heartbeat: 238/238 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 483 | 91.64 | 85.9 | 130.5 | 194 |
-| auth_rate_limit | 483 | 23.45 | 20.44 | 40.5 | 81.5 |
-| auth_token | 483 | 23.46 | 21.12 | 38.5 | 77 |
-| auth_credential | 483 | 0 | 0 | 0 | 0 |
-| membership | 483 | 0 | 0 | 0 | 0 |
-| transfer | 483 | 16.58 | 14.03 | 29.48 | 113 |
-| do | 483 | 28.09 | 27.47 | 33.31 | 37.25 |
-| worker_other | 483 | 0.06 | 0 | 1 | 1.03 |
-| client | 483 | 132.4 | 120.87 | 191.33 | 420 |
-| transport_client | 483 | 40.76 | 34.24 | 52.25 | 316 |
+| worker | 238 | 227.48 | 207.92 | 380 | 596 |
+| auth_rate_limit | 238 | 81.32 | 74.41 | 107.5 | 268 |
+| auth_token | 238 | 80.26 | 73.67 | 99.5 | 239 |
+| auth_credential | 238 | 0 | 0 | 0 | 0 |
+| membership | 238 | 0 | 0 | 0 | 0 |
+| transfer | 238 | 28.52 | 22.1 | 41.17 | 221 |
+| do | 238 | 37.34 | 34.42 | 41.5 | 178 |
+| worker_other | 238 | 0.04 | 0 | 0 | 1.02 |
+| client | 238 | 264.93 | 242.21 | 460 | 628 |
+| transport_client | 238 | 37.45 | 32.09 | 43.75 | 316 |
 
-Observed colo/placement: {"WAW/local-WAW":483}.
+Observed colo/placement: {"WAW/local-WAW":238}.
 
-Counters: inbox_backlog_max=5, signals_sent=560, signals_acked=560.
+Timing for inbox: 241/241 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 241 | 189.55 | 173 | 303.2 | 484 |
+| auth_rate_limit | 241 | 81.78 | 71.8 | 138 | 268 |
+| auth_token | 241 | 77.04 | 72.26 | 103 | 186 |
+| auth_credential | 241 | 0 | 0 | 0 | 0 |
+| membership | 241 | 0 | 0 | 0 | 0 |
+| transfer | 241 | 0 | 0 | 0 | 0 |
+| do | 241 | 30.73 | 23.18 | 45.5 | 198 |
+| worker_other | 241 | 0 | 0 | 0 | 0 |
+| client | 241 | 226.21 | 207.33 | 358 | 520 |
+| transport_client | 241 | 36.66 | 32.6 | 47.5 | 134 |
+
+Observed colo/placement: {"WAW/local-WAW":241}.
+
+Timing for send: 239/239 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 239 | 226.64 | 213.75 | 356 | 428 |
+| auth_rate_limit | 239 | 81.34 | 73.3 | 174 | 268 |
+| auth_token | 239 | 78.82 | 75.23 | 100.25 | 194 |
+| auth_credential | 239 | 0 | 0 | 0 | 0 |
+| membership | 239 | 0 | 0 | 0 | 0 |
+| transfer | 239 | 27.01 | 22.13 | 40.83 | 99 |
+| do | 239 | 39.38 | 35.78 | 42.92 | 178 |
+| worker_other | 239 | 0.07 | 0 | 0 | 1.02 |
+| client | 239 | 270.11 | 248.9 | 430 | 648 |
+| transport_client | 239 | 43.48 | 33.25 | 65 | 356 |
+
+Observed colo/placement: {"WAW/local-WAW":239}.
+
+Counters: inbox_backlog_max=4, signals_sent=279, signals_acked=279.
 
 - PASS no errors
-- PASS every sent signal was acknowledged after drain (560/560)
+- PASS every sent signal was acknowledged after drain (279/279)
 
 #### journal-replay
 
-Writers append journal rows via claim cycles while readers page the journal with replay cursors and acknowledge progress. 8 participant(s), 30.3s recorded.
+Writers append journal rows via claim cycles while readers page the journal with replay cursors and acknowledge progress. 8 participant(s), 30.5s recorded.
 Dataset: writers=4, readers=4, page_limit=200, ttl_ms=30000.
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| acknowledge | 490 | 490 | 0 | 0 | 0 | 16.2 | 124.2 | 226 | 402 | 526.17 |
-| replay | 489 | 489 | 0 | 0 | 0 | 16.16 | 96.65 | 171.33 | 414.67 | 671.32 |
-| write_acquire | 434 | 434 | 0 | 0 | 0 | 14.34 | 124.76 | 254 | 520 | 582 |
-| write_release | 437 | 437 | 0 | 0 | 0 | 14.44 | 121.35 | 190 | 412 | 657.8 |
-| **total** | 1850 | 1850 | 0 | 0 | 0 | 61.15 | 118.59 | 206.8 | 430 | 671.32 |
+| acknowledge | 251 | 251 | 0 | 0 | 0 | 8.23 | 243.57 | 364 | 492 | 853.22 |
+| replay | 248 | 248 | 0 | 0 | 0 | 8.13 | 209.29 | 308 | 584 | 745.31 |
+| write_acquire | 240 | 240 | 0 | 0 | 0 | 7.87 | 236.82 | 356 | 436 | 630.14 |
+| write_release | 240 | 240 | 0 | 0 | 0 | 7.87 | 236.59 | 346 | 436 | 621.76 |
+| **total** | 979 | 979 | 0 | 0 | 0 | 32.11 | 233.52 | 348 | 500 | 853.22 |
 
-Timing for acknowledge: 490/490 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 490 | 96.77 | 89.04 | 154 | 276 |
-| auth_rate_limit | 490 | 24.39 | 20.37 | 43.13 | 119 |
-| auth_token | 490 | 24.59 | 20.49 | 39.63 | 115 |
-| auth_credential | 490 | 0 | 0 | 0 | 0 |
-| membership | 490 | 0 | 0 | 0 | 0 |
-| transfer | 490 | 18.33 | 15.11 | 34.5 | 67.5 |
-| do | 490 | 29.42 | 28.02 | 39.83 | 60.75 |
-| worker_other | 490 | 0.05 | 0 | 0 | 1.03 |
-| client | 490 | 136.5 | 124.2 | 226 | 402 |
-| transport_client | 490 | 39.72 | 33.5 | 48.92 | 300 |
-
-Observed colo/placement: {"WAW/local-WAW":490}.
-
-Timing for replay: 489/489 HTTP responses covered; 0 invalid residuals.
+Timing for acknowledge: 251/251 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 489 | 66.11 | 61.23 | 105 | 230 |
-| auth_rate_limit | 489 | 24.26 | 20.37 | 42.25 | 121 |
-| auth_token | 489 | 23.08 | 20.39 | 37.5 | 91 |
-| auth_credential | 489 | 0 | 0 | 0 | 0 |
-| membership | 489 | 0 | 0 | 0 | 0 |
-| transfer | 489 | 0 | 0 | 0 | 0 |
-| do | 489 | 18.71 | 17.02 | 33.93 | 71 |
-| worker_other | 489 | 0.06 | 0 | 1 | 1 |
-| client | 489 | 109.03 | 96.65 | 171.33 | 414.67 |
-| transport_client | 489 | 42.92 | 34.94 | 52.83 | 348 |
+| worker | 251 | 218.25 | 206.46 | 306 | 388 |
+| auth_rate_limit | 251 | 76.56 | 71.64 | 105 | 238 |
+| auth_token | 251 | 74.67 | 71.55 | 96.5 | 170 |
+| auth_credential | 251 | 0 | 0 | 0 | 0 |
+| membership | 251 | 0 | 0 | 0 | 0 |
+| transfer | 251 | 28.3 | 23.19 | 51.5 | 103 |
+| do | 251 | 38.62 | 36.18 | 46.5 | 134 |
+| worker_other | 251 | 0.11 | 0 | 1 | 2.02 |
+| client | 251 | 258.61 | 243.57 | 364 | 492 |
+| transport_client | 251 | 40.36 | 35.19 | 50.5 | 115 |
 
-Observed colo/placement: {"WAW/local-WAW":489}.
+Observed colo/placement: {"WAW/local-WAW":251}.
 
-Timing for write_acquire: 434/434 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 434 | 99.08 | 90.79 | 173 | 284 |
-| auth_rate_limit | 434 | 25.55 | 20.46 | 47.17 | 134 |
-| auth_token | 434 | 24.22 | 21.19 | 37.5 | 113 |
-| auth_credential | 434 | 0 | 0 | 0 | 0 |
-| membership | 434 | 0 | 0 | 0 | 0 |
-| transfer | 434 | 18.05 | 16.21 | 33.44 | 79 |
-| do | 434 | 31.21 | 29.45 | 37.38 | 62.25 |
-| worker_other | 434 | 0.06 | 0 | 1 | 1.03 |
-| client | 434 | 142.66 | 124.76 | 254 | 520 |
-| transport_client | 434 | 43.57 | 33.36 | 48.75 | 348 |
-
-Observed colo/placement: {"WAW/local-WAW":434}.
-
-Timing for write_release: 437/437 HTTP responses covered; 0 invalid residuals.
+Timing for replay: 248/248 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 437 | 94.84 | 89.37 | 142 | 206 |
-| auth_rate_limit | 437 | 23.34 | 20.36 | 36.63 | 109 |
-| auth_token | 437 | 23.15 | 20.37 | 39.17 | 85 |
-| auth_credential | 437 | 0 | 0 | 0 | 0 |
-| membership | 437 | 0 | 0 | 0 | 0 |
-| transfer | 437 | 17.49 | 15.06 | 34.75 | 67 |
-| do | 437 | 30.8 | 29.33 | 38.1 | 75 |
-| worker_other | 437 | 0.06 | 0 | 1.01 | 1.03 |
-| client | 437 | 132.74 | 121.35 | 190 | 412 |
-| transport_client | 437 | 37.9 | 31.9 | 44.75 | 310 |
+| worker | 248 | 182.35 | 172.13 | 254 | 396 |
+| auth_rate_limit | 248 | 76.76 | 71.92 | 105.5 | 179 |
+| auth_token | 248 | 76.81 | 72.17 | 95 | 242 |
+| auth_credential | 248 | 0 | 0 | 0 | 0 |
+| membership | 248 | 0 | 0 | 0 | 0 |
+| transfer | 248 | 0 | 0 | 0 | 0 |
+| do | 248 | 28.61 | 24.27 | 45.5 | 109 |
+| worker_other | 248 | 0.17 | 0 | 1.02 | 4.06 |
+| client | 248 | 224.72 | 209.29 | 308 | 584 |
+| transport_client | 248 | 42.37 | 35.64 | 48.88 | 340 |
 
-Observed colo/placement: {"WAW/local-WAW":437}.
+Observed colo/placement: {"WAW/local-WAW":248}.
 
-Counters: reader_lag_max=0, reader_lag_mean=0, seq_regressions=0, seq_gaps=0, pages_with_events=570.
+Timing for write_acquire: 240/240 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 240 | 219.57 | 204.86 | 324 | 404 |
+| auth_rate_limit | 240 | 76.09 | 69.85 | 105 | 237 |
+| auth_token | 240 | 75.33 | 69.89 | 93.67 | 194 |
+| auth_credential | 240 | 0 | 0 | 0 | 0 |
+| membership | 240 | 0 | 0 | 0 | 0 |
+| transfer | 240 | 28.71 | 22.18 | 52.5 | 166 |
+| do | 240 | 39.42 | 37.75 | 46.25 | 121 |
+| worker_other | 240 | 0.03 | 0 | 0 | 1 |
+| client | 240 | 252.84 | 236.82 | 356 | 436 |
+| transport_client | 240 | 33.27 | 32.41 | 38.13 | 48.5 |
+
+Observed colo/placement: {"WAW/local-WAW":240}.
+
+Timing for write_release: 240/240 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 240 | 217.7 | 203.44 | 308 | 404 |
+| auth_rate_limit | 240 | 73.86 | 70.44 | 95 | 175 |
+| auth_token | 240 | 75.89 | 70.95 | 96.5 | 242 |
+| auth_credential | 240 | 0 | 0 | 0 | 0 |
+| membership | 240 | 0 | 0 | 0 | 0 |
+| transfer | 240 | 28.03 | 22.35 | 40.5 | 99 |
+| do | 240 | 39.89 | 37.24 | 48.75 | 113 |
+| worker_other | 240 | 0.03 | 0 | 0 | 1 |
+| client | 240 | 251.33 | 236.59 | 346 | 436 |
+| transport_client | 240 | 33.63 | 32.23 | 38.5 | 77 |
+
+Observed colo/placement: {"WAW/local-WAW":240}.
+
+Counters: reader_lag_max=0, reader_lag_mean=0, seq_regressions=0, seq_gaps=0, pages_with_events=289.
 
 - PASS no errors
 - PASS replay pages are strictly increasing
@@ -630,104 +639,104 @@ Counters: reader_lag_max=0, reader_lag_mean=0, seq_regressions=0, seq_gaps=0, pa
 
 #### artifacts
 
-Artifact upload (no claim; sizes round-robin), metadata read-back, and a periodic kind-filtered list. The embedded tier writes text blobs via writeText. 8 participant(s), 30.5s recorded.
+Artifact upload (no claim; sizes round-robin), metadata read-back, and a periodic kind-filtered list. The embedded tier writes text blobs via writeText. 8 participant(s), 30.6s recorded.
 Dataset: sizes_bytes=[1024,65536,1048576], list_every=5, kind="bench".
 
 | op | ops | ok | conflicts | stale fence | errors | ops/s | p50 ms | p95 ms | p99 ms | max ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| list | 104 | 104 | 0 | 0 | 0 | 3.41 | 96.43 | 161 | 206 | 576.67 |
-| meta | 505 | 505 | 0 | 0 | 0 | 16.55 | 85.68 | 128.67 | 258 | 672.24 |
-| upload_1k | 165 | 165 | 0 | 0 | 0 | 5.41 | 299.78 | 404 | 552 | 665.86 |
-| upload_1m | 168 | 168 | 0 | 0 | 0 | 5.51 | 426.55 | 588 | 776 | 860.8 |
-| upload_64k | 167 | 167 | 0 | 0 | 0 | 5.47 | 324 | 454.67 | 664 | 811.23 |
-| **total** | 1109 | 1109 | 0 | 0 | 0 | 36.35 | 118.14 | 480.67 | 612 | 860.8 |
+| list | 63 | 63 | 0 | 0 | 0 | 2.06 | 215 | 404 | 929.88 | 929.88 |
+| meta | 321 | 321 | 0 | 0 | 0 | 10.48 | 197.48 | 322 | 465.33 | 525.86 |
+| upload_1k | 105 | 105 | 0 | 0 | 0 | 3.43 | 422 | 674.67 | 792 | 906.74 |
+| upload_1m | 104 | 104 | 0 | 0 | 0 | 3.4 | 526.15 | 820 | 1040 | 1151.35 |
+| upload_64k | 106 | 106 | 0 | 0 | 0 | 3.46 | 452 | 670 | 748 | 894.4 |
+| **total** | 699 | 699 | 0 | 0 | 0 | 22.83 | 286.67 | 648 | 888 | 1151.35 |
 
-Timing for list: 104/104 HTTP responses covered; 0 invalid residuals.
+Timing for list: 63/63 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 104 | 60.91 | 55.19 | 93.67 | 119 |
-| auth_rate_limit | 104 | 21.27 | 19.23 | 36.5 | 72 |
-| auth_token | 104 | 21.07 | 19.25 | 32.75 | 39.5 |
+| worker | 63 | 178.78 | 167.09 | 246 | 419 |
+| auth_rate_limit | 63 | 69.03 | 67.17 | 89 | 107 |
+| auth_token | 63 | 71.98 | 68.13 | 97 | 192 |
+| auth_credential | 63 | 0 | 0 | 0 | 0 |
+| membership | 63 | 0 | 0 | 0 | 0 |
+| transfer | 63 | 0 | 0 | 0 | 0 |
+| do | 63 | 37.76 | 29.46 | 48.5 | 250 |
+| worker_other | 63 | 0 | 0 | 0 | 0 |
+| client | 63 | 245.99 | 215 | 404 | 929.88 |
+| transport_client | 63 | 67.22 | 48.17 | 170 | 562.88 |
+
+Observed colo/placement: {"WAW/local-WAW":63}.
+
+Timing for meta: 321/321 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 321 | 175.63 | 162.19 | 268 | 433.33 |
+| auth_rate_limit | 321 | 73.18 | 68.58 | 94.5 | 175 |
+| auth_token | 321 | 72.59 | 68.68 | 95.25 | 218 |
+| auth_credential | 321 | 0 | 0 | 0 | 0 |
+| membership | 321 | 0 | 0 | 0 | 0 |
+| transfer | 321 | 0 | 0 | 0 | 0 |
+| do | 321 | 0 | 0 | 0 | 0 |
+| worker_other | 321 | 29.86 | 23.06 | 40.25 | 260 |
+| client | 321 | 212.13 | 197.48 | 322 | 465.33 |
+| transport_client | 321 | 36.5 | 33.37 | 44.75 | 170 |
+
+Observed colo/placement: {"WAW/local-WAW":321}.
+
+Timing for upload_1k: 105/105 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 105 | 411.54 | 384.67 | 616 | 696 |
+| auth_rate_limit | 105 | 73.7 | 66.9 | 95 | 194 |
+| auth_token | 105 | 69.5 | 67.93 | 87 | 95.5 |
+| auth_credential | 105 | 0 | 0 | 0 | 0 |
+| membership | 105 | 0 | 0 | 0 | 0 |
+| transfer | 105 | 36.57 | 21.22 | 198 | 308 |
+| do | 105 | 46.3 | 38.97 | 87 | 198 |
+| worker_other | 105 | 185.47 | 169.25 | 260 | 364 |
+| client | 105 | 449.14 | 422 | 674.67 | 792 |
+| transport_client | 105 | 37.6 | 33.63 | 47.5 | 69 |
+
+Observed colo/placement: {"WAW/local-WAW":105}.
+
+Timing for upload_1m: 104/104 HTTP responses covered; 0 invalid residuals.
+
+| component | count | mean ms | p50 ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---:|---:|
+| worker | 104 | 481.71 | 448.67 | 712 | 824 |
+| auth_rate_limit | 104 | 69.52 | 65.71 | 91 | 142 |
+| auth_token | 104 | 71.36 | 68.9 | 85.5 | 97 |
 | auth_credential | 104 | 0 | 0 | 0 | 0 |
 | membership | 104 | 0 | 0 | 0 | 0 |
-| transfer | 104 | 0 | 0 | 0 | 0 |
-| do | 104 | 18.58 | 14.16 | 36.5 | 57 |
-| worker_other | 104 | 0 | 0 | 0 | 0 |
-| client | 104 | 107.45 | 96.43 | 161 | 206 |
-| transport_client | 104 | 46.54 | 39.94 | 63.75 | 87 |
+| transfer | 104 | 23.98 | 21.15 | 37.5 | 65 |
+| do | 104 | 56.64 | 39.05 | 206 | 316 |
+| worker_other | 104 | 260.2 | 246 | 372 | 536 |
+| client | 104 | 573.1 | 526.15 | 820 | 1040 |
+| transport_client | 104 | 91.38 | 73.67 | 158 | 332 |
 
 Observed colo/placement: {"WAW/local-WAW":104}.
 
-Timing for meta: 505/505 HTTP responses covered; 0 invalid residuals.
+Timing for upload_64k: 106/106 HTTP responses covered; 0 invalid residuals.
 
 | component | count | mean ms | p50 ms | p95 ms | p99 ms |
 |---|---:|---:|---:|---:|---:|
-| worker | 505 | 55.15 | 49.82 | 86.5 | 145 |
-| auth_rate_limit | 505 | 20.76 | 18.47 | 33.5 | 48.83 |
-| auth_token | 505 | 21.13 | 19.16 | 31.44 | 87 |
-| auth_credential | 505 | 0 | 0 | 0 | 0 |
-| membership | 505 | 0 | 0 | 0 | 0 |
-| transfer | 505 | 0 | 0 | 0 | 0 |
-| do | 505 | 0 | 0 | 0 | 0 |
-| worker_other | 505 | 13.26 | 9.06 | 32.3 | 44.75 |
-| client | 505 | 93.91 | 85.68 | 128.67 | 258 |
-| transport_client | 505 | 38.76 | 34.01 | 47.25 | 161 |
+| worker | 106 | 432.57 | 396 | 632 | 716 |
+| auth_rate_limit | 106 | 76.14 | 68.5 | 89 | 308 |
+| auth_token | 106 | 74.08 | 67.92 | 89 | 234 |
+| auth_credential | 106 | 0 | 0 | 0 | 0 |
+| membership | 106 | 0 | 0 | 0 | 0 |
+| transfer | 106 | 26.71 | 21.28 | 67 | 115 |
+| do | 106 | 59.3 | 39.55 | 206 | 348 |
+| worker_other | 106 | 196.35 | 183.67 | 294 | 340 |
+| client | 106 | 480.98 | 452 | 670 | 748 |
+| transport_client | 106 | 48.4 | 40.5 | 77 | 105 |
 
-Observed colo/placement: {"WAW/local-WAW":505}.
+Observed colo/placement: {"WAW/local-WAW":106}.
 
-Timing for upload_1k: 165/165 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 165 | 275.19 | 262.75 | 356 | 500 |
-| auth_rate_limit | 165 | 20.29 | 19.1 | 33.17 | 58.5 |
-| auth_token | 165 | 22.15 | 19.28 | 32.5 | 127 |
-| auth_credential | 165 | 0 | 0 | 0 | 0 |
-| membership | 165 | 0 | 0 | 0 | 0 |
-| transfer | 165 | 11.38 | 7.05 | 33.5 | 58.5 |
-| do | 165 | 31.94 | 30.39 | 40.17 | 83 |
-| worker_other | 165 | 189.44 | 176.6 | 260 | 412 |
-| client | 165 | 313.91 | 299.78 | 404 | 552 |
-| transport_client | 165 | 38.73 | 33.77 | 45.75 | 292 |
-
-Observed colo/placement: {"WAW/local-WAW":165}.
-
-Timing for upload_1m: 168/168 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 168 | 340.83 | 333 | 436 | 524 |
-| auth_rate_limit | 168 | 21.58 | 19.13 | 35.75 | 87 |
-| auth_token | 168 | 22.86 | 19.24 | 39.5 | 186 |
-| auth_credential | 168 | 0 | 0 | 0 | 0 |
-| membership | 168 | 0 | 0 | 0 | 0 |
-| transfer | 168 | 12.15 | 7.11 | 33.5 | 63.5 |
-| do | 168 | 32.67 | 30.39 | 42.5 | 87 |
-| worker_other | 168 | 251.58 | 243.82 | 342 | 444 |
-| client | 168 | 442.32 | 426.55 | 588 | 776 |
-| transport_client | 168 | 101.48 | 80.25 | 190 | 428 |
-
-Observed colo/placement: {"WAW/local-WAW":168}.
-
-Timing for upload_64k: 167/167 HTTP responses covered; 0 invalid residuals.
-
-| component | count | mean ms | p50 ms | p95 ms | p99 ms |
-|---|---:|---:|---:|---:|---:|
-| worker | 167 | 286.56 | 274.25 | 388 | 500 |
-| auth_rate_limit | 167 | 22.1 | 19.12 | 40.5 | 73 |
-| auth_token | 167 | 21.88 | 19.18 | 35.5 | 73 |
-| auth_credential | 167 | 0 | 0 | 0 | 0 |
-| membership | 167 | 0 | 0 | 0 | 0 |
-| transfer | 167 | 13.38 | 7.08 | 33.25 | 45.5 |
-| do | 167 | 33.28 | 30.4 | 43.5 | 121 |
-| worker_other | 167 | 195.92 | 186.31 | 274 | 412 |
-| client | 167 | 340.45 | 324 | 454.67 | 664 |
-| transport_client | 167 | 53.88 | 41.38 | 87.5 | 372 |
-
-Observed colo/placement: {"WAW/local-WAW":167}.
-
-Counters: meta_size_mismatches=0, bytes_uploaded=217450496.
+Counters: meta_size_mismatches=0, bytes_uploaded=136113152.
 
 - PASS no errors
 - PASS metadata byte counts match uploads

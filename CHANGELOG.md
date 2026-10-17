@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-17
+
+### Upgrade notes
+
+- Deploy the Worker and its bundled UI before upgrading clients (`tila deploy`). Unlike 0.11.1, this release changes the Worker: deleting a plain artifact (one whose key does not start with `versioned/`) now confirms the stored blob is gone before it reports success. There are no migrations, no new capabilities and no changes to authentication, so credentials keep working. If you are coming from 0.10.x or earlier, follow the 0.11.0 notes first.
+- Deleting a plain artifact can now return `502` with the retryable error code `blob-delete-confirmation-failed`. It means the blob was removed from R2 but the project database could not record that. Retry the same delete; it is safe to repeat. A failure to remove the blob from R2 is unchanged: the call returns `200` with `ok: true` and `r2_orphaned: true`, and the blob stays in R2, so exports can still read it. Callers that treated every 5xx from artifact deletion as fatal should retry on this code.
+- `TilaErrorCode` and `TILA_ERRORS` in `tila-sdk` now list 66 more server error codes, including `conflict` and `blob-delete-confirmation-failed`. Code that switches exhaustively over `TilaErrorCode` fails to type-check until it handles the new members or adds a default branch. Codes that used to arrive as `UNKNOWN` now arrive as their typed value, so a `case "UNKNOWN"` branch stops matching them; handle the typed codes or keep a default branch.
+- The SDK now accepts failed responses that omit the `ok` field, as some management routes do. Responses with codes it still does not recognize, and malformed responses, keep falling back to `UNKNOWN` with the HTTP status and server message intact.
+
+### Fixes
+
+- A project backup export no longer breaks after a plain artifact is deleted (#593, fixes #591). Deletion left the stored blob marked live in the project database, so the next export tried to fetch bytes that no longer existed. Deletion now records `blob_deleted_at` (the time the blob was removed) and clears inline content, keeping the tombstone (the deletion marker row kept in the project database) and audit history, and exports skip the deleted blob. Artifacts deleted this way before the release are not repaired automatically and there is no documented workaround yet, so exports of those projects can still fail until a repair ships (#593 lists this as outside the fix).
+- Creating a record that already exists now reports `409` with the typed `conflict` code instead of `UNKNOWN` (#594, fixes #592). `TilaApiError.code` can be compared to `"conflict"` and type-checks. The same change keeps every other server code that the SDK used to flatten to `UNKNOWN`.
+
 ## [0.11.1] - 2026-10-17
 
 ### Upgrade notes
@@ -548,7 +562,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/davebream/tila/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/davebream/tila/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/davebream/tila/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/davebream/tila/compare/v0.9.0...v0.10.0
