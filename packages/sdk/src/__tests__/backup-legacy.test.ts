@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  statSync,
+} from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -135,6 +140,14 @@ describe("project backup exported before 0.8 (v0.7.0 SDK)", () => {
     const { archive } = await workspace();
     expect(sha256(legacyV070Archive())).toBe(ARCHIVE_SHA256);
     const { manifest, entries } = await inspectProjectBackup(archive);
+    const stored = (await readEntries(archive)).find(
+      (entry) => entry.name === "manifest.json",
+    );
+    if (!stored) throw new Error("Missing stored manifest");
+    expect(
+      JSON.parse(stored.data.toString("utf8")).stats.archive_bytes,
+    ).not.toBe(statSync(archive).size);
+    expect(manifest.stats.archive_bytes).toBe(statSync(archive).size);
     expect(manifest.source).toMatchObject({
       product_version: "0.7.0",
       do_migration_version: 40,
@@ -162,6 +175,8 @@ describe("project backup exported before 0.8 (v0.7.0 SDK)", () => {
       archive,
       destination: target,
     });
+    expect(restored.manifest.stats.archive_bytes).toBe(statSync(archive).size);
+    expect(sha256(await readFile(archive))).toBe(ARCHIVE_SHA256);
     expect(restored.manifest.semantic_digest).toBe(MANIFEST_DIGEST);
     const local = await createTilaLocal({
       dbPath: target.dbPath,

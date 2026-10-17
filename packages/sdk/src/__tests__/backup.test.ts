@@ -3,14 +3,16 @@ import {
   createWriteStream,
   existsSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { mkdtemp, readFile, rm, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar-stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   exportProjectBackup,
   importProjectBackup,
@@ -19,13 +21,14 @@ import {
 import { createTilaLocal } from "../local";
 
 const roots: string[] = [];
-afterEach(async () =>
-  Promise.all(
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
-  ),
-);
+  );
+});
 
-async function fixture(withBlob = false) {
+async function fixture(withBlob = false, blobBytes = 3 * 1024 * 1024) {
   const root = await mkdtemp(join(tmpdir(), "tila-backup-test-"));
   roots.push(root);
   const source = {
@@ -64,7 +67,7 @@ async function fixture(withBlob = false) {
     | { key: string; sha: string; bytes: number; fence: number }
     | undefined;
   if (withBlob) {
-    const body = new Uint8Array(3 * 1024 * 1024).fill(97);
+    const body = new Uint8Array(blobBytes).fill(97);
     const sha = createHash("sha256").update(body).digest("hex");
     const key = `local/${source.projectId}/${sha}.bin`;
     await local.artifacts.put({
@@ -81,10 +84,92 @@ async function fixture(withBlob = false) {
 }
 
 describe("project backup archive", () => {
+  async function storedManifest(archive: string) {
+    const extract = tar.extract();
+    const reading = pipeline(Readable.from([readFileSync(archive)]), extract);
+    let buffer: Buffer | undefined;
+    for await (const entry of extract) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of entry) {
+        if (!Buffer.isBuffer(chunk)) throw new Error("Expected a tar buffer");
+        if (entry.header.name === "manifest.json") chunks.push(chunk);
+      }
+      if (entry.header.name === "manifest.json") buffer = Buffer.concat(chunks);
+    }
+    await reading;
+    if (!buffer) throw new Error("Missing stored manifest");
+    return {
+      manifest: JSON.parse(buffer.toString("utf8")),
+      bytes: buffer.length,
+    };
+  }
+
+  it.each([false, true])(
+    "reports completed file bytes through a round trip (blob: %s)",
+    async (withBlob) => {
+      const { root, source } = await fixture(withBlob, 513);
+      const archive = join(root, "sizes.tila-backup");
+      const exported = await exportProjectBackup({ source, output: archive });
+      const actualBytes = statSync(archive).size;
+      const stored = await storedManifest(archive);
+      const inspected = await inspectProjectBackup(archive);
+      const imported = await importProjectBackup({
+        archive,
+        destination: {
+          ...source,
+          dbPath: join(root, "restored.db"),
+          artifactsPath: join(root, "restored-artifacts"),
+        },
+      });
+      expect(exported.stats.archive_bytes).toBe(actualBytes);
+      expect(stored.manifest.stats.archive_bytes).toBe(actualBytes);
+      expect(inspected.manifest.stats.archive_bytes).toBe(actualBytes);
+      expect(imported.manifest.stats.archive_bytes).toBe(actualBytes);
+      expect(exported.entries.some((entry) => entry.bytes === 0)).toBe(true);
+      expect(actualBytes).toBeGreaterThan(
+        exported.entries.reduce((sum, entry) => sum + entry.bytes, 0),
+      );
+    },
+  );
+
+  it("includes a manifest that grows across a tar block boundary", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-17T12:00:00Z"));
+    const { root, source } = await fixture();
+    const initial = join(root, "initial.tila-backup");
+    await exportProjectBackup({ source, output: initial });
+    const original = await storedManifest(initial);
+    // Place the serialized manifest just beyond a block boundary. The size
+    // field itself grows from the initial zero while finalization converges.
+    const padding = 512 - (original.bytes % 512) + 1;
+    const archive = join(root, "boundary.tila-backup");
+    const exported = await exportProjectBackup({
+      source: {
+        ...source,
+        productVersion:
+          original.manifest.source.product_version + "x".repeat(padding),
+      },
+      output: archive,
+    });
+    const stored = await storedManifest(archive);
+    expect(stored.bytes % 512).toBe(1);
+    expect(Math.ceil(stored.bytes / 512)).toBeGreaterThan(
+      Math.ceil(original.bytes / 512),
+    );
+    expect(stored.manifest.stats.archive_bytes).toBe(statSync(archive).size);
+    expect(exported.stats.archive_bytes).toBe(statSync(archive).size);
+    expect(
+      (await inspectProjectBackup(archive)).manifest.stats.archive_bytes,
+    ).toBe(statSync(archive).size);
+  });
+
   it("streams a large blob and completes a semantic recovery drill", async () => {
     const { root, source, expected } = await fixture(true);
     const archive = join(root, "project.tila-backup");
     const manifest = await exportProjectBackup({ source, output: archive });
+    expect((await storedManifest(archive)).manifest.stats.archive_bytes).toBe(
+      statSync(archive).size,
+    );
     await rm(source.dbPath, { force: true });
     await rm(source.artifactsPath, { recursive: true, force: true });
     const destination = {
