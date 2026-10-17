@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixes
 
-- A project backup export no longer breaks after a plain artifact is deleted (#593, fixes #591). Deletion left the stored blob marked live in the project database, so the next export tried to fetch bytes that no longer existed. Deletion now records `blob_deleted_at` (the time the blob was removed) and clears inline content, keeping the tombstone (the deletion marker row kept in the project database) and audit history, and exports skip the deleted blob. Artifacts deleted this way before the release are not repaired automatically and there is no documented workaround yet, so exports of those projects still fail until a repair ships; #591 tracks the failure.
+- A project backup export no longer breaks after a plain artifact is deleted (#593, fixes #591). Deletion left the stored blob marked live in the project database, so the next export tried to fetch bytes that no longer existed. Deletion now records `blob_deleted_at` (the time the blob was removed) and clears inline content, keeping the tombstone (the deletion marker row kept in the project database) and audit history, and exports skip the deleted blob. Artifacts deleted this way before the release are not repaired automatically and there is no documented workaround yet, so exports of those projects can still fail until a repair ships (#593 lists this as outside the fix).
 - Creating a record that already exists now reports `409` with the typed `conflict` code instead of `UNKNOWN` (#594, fixes #592). `TilaApiError.code` can be compared to `"conflict"` and type-checks. The same change keeps every other server code that the SDK used to flatten to `UNKNOWN`.
 
 ## [0.11.1] - 2026-10-17
