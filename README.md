@@ -9,7 +9,7 @@ Content-addressed artifacts and coordination protected by fencing tokens.
 
 Deploy to your own Cloudflare account, or run locally with zero infrastructure.
 
-> **Status:** v0.12.0 — APIs may change before v1.0. Deploy the Worker and bundled UI together before upgrading clients: this release makes artifact deletion confirm blob removal and adds 66 SDK error codes, so exhaustive `TilaErrorCode` switches need updating. If you are coming from 0.10.x or earlier, read the [0.11.0 upgrade notes](CHANGELOG.md#0110---2026-10-16) first (migrations 43–45, checkpoint recovery, client behavior changes). Details for this release are in the [v0.12.0 notes](CHANGELOG.md#0120---2026-10-17).
+> **Status:** v0.12.1 — APIs may change before v1.0. Upgrade the CLI and SDK for reliable long-running cloud exports; this patch requires no Worker deployment or migrations. If upgrading from an earlier release, follow the intervening upgrade notes first. Details are in the [v0.12.1 notes](CHANGELOG.md#0121---2026-10-17).
 
 </div>
 
@@ -17,7 +17,7 @@ tila is one development-management product with a reusable state-and-coordinatio
 core. The Cloudflare deployment holds shared project state; CLI, MCP, SDK, and web
 clients use its service contracts.
 
-**Delivered as of v0.12.0:** schema-defined tasks and records, claims/fences, artifacts,
+**Delivered as of v0.12.1:** schema-defined tasks and records, claims/fences, artifacts,
 journal cursors and handoffs, conversations, and a managed work queue with durable
 assignments, attempts, questions/decisions, and explicit results. An attempt is one
 execution of a task; its result is recorded separately from task and terminal state.

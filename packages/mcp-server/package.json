@@ -1,6 +1,6 @@
 {
   "name": "tila-mcp-server",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "license": "MIT",
   "description": "MCP server for tila — enables Claude Code, Cursor, and VS Code Copilot integration",
   "keywords": [

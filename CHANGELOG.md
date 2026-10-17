@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-17
+
+### Upgrade notes
+
+- Upgrade the CLI and SDK to get the cloud export fix. No Worker deployment or migrations are required for this patch; authentication, API signatures and backup archive format are unchanged. If upgrading from an earlier release, follow the intervening upgrade notes first.
+
+### Fixes
+
+- Cloud project exports keep their five-minute maintenance lease alive throughout metadata reads, archived journal reads, artifact downloads and archive verification, including long-running requests (#598, fixes #597). If renewal fails, export cancels active work, preserves the original error and attempts to remove its temporary archive and release its own lease. A verified archive is published only after the lease is released. Safety exports taken before restore refresh and retain the lease for the restore to continue.
+
 ## [0.12.0] - 2026-10-17
 
 ### Upgrade notes
@@ -562,7 +572,8 @@ First public release.
 - Read-only dashboard SPA served by the Worker
 - GitHub-scoped authentication (default) and D1 API tokens (admin)
 
-[Unreleased]: https://github.com/davebream/tila/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/davebream/tila/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/davebream/tila/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/davebream/tila/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/davebream/tila/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/davebream/tila/compare/v0.10.0...v0.11.0
