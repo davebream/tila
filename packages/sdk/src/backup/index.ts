@@ -198,6 +198,50 @@ async function addBuffer(
   });
 }
 
+function createBackupPack() {
+  let bytes = 0;
+  // tar-stream forwards these options to streamx. Its map hook runs when
+  // serialized chunks are pushed, including headers and padding still buffered
+  // under disk backpressure. A 'data' listener would miss those queued bytes.
+  const options = {
+    highWaterMark: 16 * 1024,
+    map(chunk: Buffer): Buffer {
+      bytes += chunk.byteLength;
+      return chunk;
+    },
+  };
+  return { pack: tar.pack(options), bytes: () => bytes };
+}
+
+async function finalizeBackupArchive(
+  writer: ReturnType<typeof createBackupPack>,
+  writing: Promise<void>,
+  temporary: string,
+  manifest: ProjectBackupManifest,
+): Promise<void> {
+  // Call only after every entry has finished: its padding has then been pushed
+  // through the counter, even if the file stream has not written it yet.
+  const prefixBytes = writer.bytes();
+  let buffer: Buffer;
+  for (;;) {
+    buffer = jsonBuffer(manifest);
+    // manifest.json uses one ustar header; finalize adds two zero end blocks.
+    const bytes =
+      prefixBytes + 512 + Math.ceil(buffer.length / 512) * 512 + 1024;
+    if (manifest.stats.archive_bytes === bytes) break;
+    manifest.stats.archive_bytes = bytes;
+  }
+  await addBuffer(writer.pack, [], "manifest.json", buffer);
+  writer.pack.finalize();
+  await writing;
+  if (statSync(temporary).size !== manifest.stats.archive_bytes) {
+    throw new Error(
+      "Completed backup size does not match manifest archive_bytes",
+    );
+  }
+  await inspectProjectBackup(temporary);
+}
+
 function ensureOutputAvailable(output: string): string {
   if (!resolve(output).startsWith(`${resolve(dirname(output))}${sep}`)) {
     throw new Error("Backup output path could not be resolved safely");
@@ -261,7 +305,8 @@ async function exportLocal(
       ttlMs: 300_000,
     });
     if (control?.keepLock) queueBackupOps.assertRestoreQuiescent(db);
-    const pack = tar.pack();
+    const writer = createBackupPack();
+    const { pack } = writer;
     const file = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
     const writing = pipeline(pack, file);
     const entries: ProjectBackupEntry[] = [];
@@ -417,10 +462,6 @@ async function exportLocal(
     }
 
     const semantic = await projectTransferOps.semanticDigest(sql);
-    const archiveBytesBeforeManifest = entries.reduce(
-      (sum, entry) => sum + entry.bytes,
-      0,
-    );
     const manifest: ProjectBackupManifest = {
       format: PROJECT_BACKUP_FORMAT,
       format_version: PROJECT_BACKUP_FORMAT_VERSION,
@@ -459,15 +500,11 @@ async function exportLocal(
         rows: rowsTotal + 1,
         objects: objects.length,
         blob_bytes: blobBytes,
-        archive_bytes: archiveBytesBeforeManifest,
+        archive_bytes: 0,
         elapsed_ms: Date.now() - startedAt,
       },
     };
-    await addBuffer(pack, [], "manifest.json", jsonBuffer(manifest));
-    pack.finalize();
-    await writing;
-
-    await inspectProjectBackup(temporary);
+    await finalizeBackupArchive(writer, writing, temporary, manifest);
     renameSync(temporary, options.output);
     if (!control?.keepLock) projectTransferOps.finishTransfer(sql, sessionId);
     finished = true;
@@ -475,7 +512,6 @@ async function exportLocal(
       ...manifest,
       stats: {
         ...manifest.stats,
-        archive_bytes: statSync(options.output).size,
         elapsed_ms: Date.now() - startedAt,
       },
     };
@@ -513,6 +549,13 @@ async function scanArchive(
   const seen: SeenEntry[] = [];
   const paths = new Set<string>();
   const data = new Map<string, Buffer>();
+  let archiveBytes = 0;
+  const counter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      archiveBytes += chunk.byteLength;
+      callback(null, chunk);
+    },
+  });
   let lastPath = "";
   let failure: Error | null = null;
   let headerValue: unknown;
@@ -579,7 +622,7 @@ async function scanArchive(
       failure = error;
     });
   });
-  await pipeline(createReadStream(archive), extract);
+  await pipeline(createReadStream(archive), counter, extract);
   if (failure) throw failure;
   if (lastPath !== "manifest.json" || manifestValue === undefined) {
     throw new Error(
@@ -671,6 +714,9 @@ async function scanArchive(
     );
   if (contentRoot(manifest.entries) !== manifest.content_root)
     throw new Error("Backup content-root digest mismatch");
+  // Older format-v1 writers stored payload bytes here. Report the measured
+  // archive size only after validation; this statistic is not an integrity gate.
+  manifest.stats.archive_bytes = archiveBytes;
   return { manifest, header, seen, data };
 }
 
@@ -1007,7 +1053,8 @@ async function exportCloud(
         }),
       },
     );
-    const pack = tar.pack();
+    const writer = createBackupPack();
+    const { pack } = writer;
     const writing = pipeline(
       pack,
       createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
@@ -1288,14 +1335,11 @@ async function exportCloud(
         rows: rowsTotal,
         objects: objects.length,
         blob_bytes: blobBytes,
-        archive_bytes: entries.reduce((sum, entry) => sum + entry.bytes, 0),
+        archive_bytes: 0,
         elapsed_ms: Date.now() - startedAt,
       },
     };
-    await addBuffer(pack, [], "manifest.json", jsonBuffer(manifest));
-    pack.finalize();
-    await writing;
-    await inspectProjectBackup(temporary);
+    await finalizeBackupArchive(writer, writing, temporary, manifest);
     renameSync(temporary, options.output);
     if (!control?.keepLock) {
       await client.json("/transfer/complete-export", {
@@ -1309,7 +1353,6 @@ async function exportCloud(
       ...manifest,
       stats: {
         ...manifest.stats,
-        archive_bytes: statSync(options.output).size,
         elapsed_ms: Date.now() - startedAt,
       },
     };
