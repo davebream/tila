@@ -218,6 +218,7 @@ async function finalizeBackupArchive(
   writing: Promise<void>,
   temporary: string,
   manifest: ProjectBackupManifest,
+  signal?: AbortSignal,
 ): Promise<void> {
   // Call only after every entry has finished: its padding has then been pushed
   // through the counter, even if the file stream has not written it yet.
@@ -239,7 +240,7 @@ async function finalizeBackupArchive(
       "Completed backup size does not match manifest archive_bytes",
     );
   }
-  await inspectProjectBackup(temporary);
+  await inspectBackupArchive(temporary, signal);
 }
 
 function ensureOutputAvailable(output: string): string {
@@ -539,6 +540,7 @@ type SeenEntry = { path: string; sha256: string; bytes: number; rows?: number };
 async function scanArchive(
   archive: string,
   captureData: boolean,
+  signal?: AbortSignal,
 ): Promise<{
   manifest: ProjectBackupManifest;
   header: ReturnType<typeof ProjectBackupHeaderSchema.parse>;
@@ -622,7 +624,7 @@ async function scanArchive(
       failure = error;
     });
   });
-  await pipeline(createReadStream(archive), counter, extract);
+  await pipeline(createReadStream(archive), counter, extract, { signal });
   if (failure) throw failure;
   if (lastPath !== "manifest.json" || manifestValue === undefined) {
     throw new Error(
@@ -720,10 +722,11 @@ async function scanArchive(
   return { manifest, header, seen, data };
 }
 
-export async function inspectProjectBackup(
+async function inspectBackupArchive(
   archive: string,
+  signal?: AbortSignal,
 ): Promise<InspectedProjectBackup> {
-  const scanned = await scanArchive(archive, false);
+  const scanned = await scanArchive(archive, false, signal);
   return {
     header: scanned.header,
     manifest: scanned.manifest,
@@ -738,6 +741,12 @@ export async function inspectProjectBackup(
         }
       : {}),
   };
+}
+
+export async function inspectProjectBackup(
+  archive: string,
+): Promise<InspectedProjectBackup> {
+  return inspectBackupArchive(archive);
 }
 
 function parseJsonl(buffer: Buffer | undefined): Record<string, unknown>[] {
@@ -1029,6 +1038,75 @@ export class TilaOperatorClient {
   }
 }
 
+const CLOUD_EXPORT_TTL_MS = 300_000;
+const CLOUD_EXPORT_RENEW_MS = 60_000;
+const TRANSFER_REQUEST_TIMEOUT_MS = 30_000;
+
+async function withTransferTimeout<T>(
+  action: (signal: AbortSignal) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error("Backup transfer request timed out")),
+    TRANSFER_REQUEST_TIMEOUT_MS,
+  );
+  const requestSignal = signal
+    ? AbortSignal.any([signal, controller.signal])
+    : controller.signal;
+  try {
+    return await action(requestSignal);
+  } catch (error) {
+    // Response-body readers may throw AbortError instead of the abort reason.
+    requestSignal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function startCloudExportLease(client: TilaOperatorClient, sessionId: string) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: Promise<void> = Promise.resolve();
+  let stopped = false;
+  const renew = () =>
+    withTransferTimeout(
+      (signal) =>
+        client.json("/transfer/renew", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, ttlMs: CLOUD_EXPORT_TTL_MS }),
+          signal,
+        }),
+      controller.signal,
+    );
+  const schedule = () => {
+    timer = setTimeout(() => {
+      pending = renew()
+        .then(() => {
+          if (!stopped) schedule();
+        })
+        .catch((error) => controller.abort(error));
+    }, CLOUD_EXPORT_RENEW_MS);
+    timer.unref?.();
+  };
+  schedule();
+  return {
+    signal: controller.signal,
+    abort: (error: unknown) => controller.abort(error),
+    async stop(refresh = false) {
+      stopped = true;
+      clearTimeout(timer);
+      await pending;
+      if (refresh) {
+        controller.signal.throwIfAborted();
+        await renew();
+      }
+    },
+  };
+}
+
 async function exportCloud(
   options: ExportProjectBackupOptions,
   control?: { sessionId: string; keepLock: boolean },
@@ -1039,6 +1117,9 @@ async function exportCloud(
   const client = new TilaOperatorClient(source);
   const sessionId = control?.sessionId ?? randomUUID();
   let completed = false;
+  let acquired = false;
+  let lease: ReturnType<typeof startCloudExportLease> | undefined;
+  let writing: Promise<void> | undefined;
   try {
     const begun = await client.json<{ state: { started_at: number } }>(
       "/transfer/begin",
@@ -1049,16 +1130,27 @@ async function exportCloud(
           sessionId,
           mode: "export",
           owner: "sdk",
-          ttlMs: 300_000,
+          ttlMs: CLOUD_EXPORT_TTL_MS,
         }),
       },
     );
+    acquired = true;
+    lease = startCloudExportLease(client, sessionId);
+    const { signal } = lease;
+    const request = (path: string, init: RequestInit = {}) =>
+      client.request(path, { ...init, signal });
+    const json = async <T>(path: string, init: RequestInit = {}): Promise<T> =>
+      (await (await request(path, init)).json()) as T;
     const writer = createBackupPack();
     const { pack } = writer;
-    const writing = pipeline(
+    writing = pipeline(
       pack,
       createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
+      { signal },
     );
+    // Observe failures immediately, including while an HTTP body is pending.
+    // The original promise is still awaited before cleanup removes the file.
+    void writing.catch((error) => lease?.abort(error));
     const entries: ProjectBackupEntry[] = [];
     const createdAt = new Date().toISOString();
     if (options.checkpoint) {
@@ -1080,7 +1172,7 @@ async function exportCloud(
       }),
     );
 
-    const meta = await client.json<{
+    const meta = await json<{
       digest: string;
       journal: { nextSequence: number; archiveWatermark: number };
       migrationVersion: number;
@@ -1096,16 +1188,11 @@ async function exportCloud(
         const page: {
           rows: Record<string, unknown>[];
           nextOffset: number | null;
-        } = await client.json(
+        } = await json(
           `/transfer/snapshot/${table}?sessionId=${encodeURIComponent(sessionId)}&offset=${offset}&limit=500`,
         );
         rows.push(...page.rows);
         offset = page.nextOffset;
-        await client.json("/transfer/renew", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, ttlMs: 300_000 }),
-        });
       }
       if (table === "artifact_pointers") pointerRows.push(...rows);
       collectRecoveryRecords(table, rows, recoveryRecords);
@@ -1118,7 +1205,7 @@ async function exportCloud(
         rows.length,
       );
     }
-    const d1 = await client.json<{
+    const d1 = await json<{
       sections: Record<string, Record<string, unknown>[]>;
     }>(`/d1?sessionId=${encodeURIComponent(sessionId)}`);
     const d1Digest = digestBuffer(
@@ -1145,7 +1232,7 @@ async function exportCloud(
       let httpMetadata: Record<string, unknown> = {};
       let customMetadata: Record<string, string> = {};
       if (!deleted) {
-        const metadata = await client.json<{
+        const metadata = await json<{
           httpMetadata: Record<string, unknown>;
           customMetadata: Record<string, string>;
           bytes: number;
@@ -1168,7 +1255,7 @@ async function exportCloud(
         custom_metadata: customMetadata,
       });
     }
-    const archives = await client.json<{
+    const archives = await json<{
       objects: Array<{
         key: string;
         bytes: number;
@@ -1177,7 +1264,7 @@ async function exportCloud(
     }>(`/journal-archives?sessionId=${encodeURIComponent(sessionId)}`);
     const archivedSequences = new Set<number>();
     for (const archiveObject of archives.objects) {
-      const response = await client.request(
+      const response = await request(
         `/object?sessionId=${encodeURIComponent(sessionId)}&key=${encodeURIComponent(archiveObject.key)}`,
       );
       const text = await response.text();
@@ -1243,7 +1330,7 @@ async function exportCloud(
         blobBytes += recovery.length;
         continue;
       }
-      const response = await client.request(
+      const response = await request(
         `/object?sessionId=${encodeURIComponent(sessionId)}&key=${encodeURIComponent(object.key)}`,
       );
       if (!response.body)
@@ -1254,10 +1341,14 @@ async function exportCloud(
         mode: 0o600,
       });
       const { transform, done } = createHashingTransform(object.sha256);
+      // A checksum error rejects both promises; observe it before the pipeline
+      // finishes tearing down its streams.
+      void done.catch(() => {});
       await pipeline(
         Readable.fromWeb(response.body as never),
         transform,
         target,
+        { signal },
       );
       await done;
       entries.push({
@@ -1273,7 +1364,7 @@ async function exportCloud(
         elapsedMs: Date.now() - startedAt,
       });
     }
-    const d1After = await client.json<{
+    const d1After = await json<{
       sections: Record<string, Record<string, unknown>[]>;
     }>(`/d1?sessionId=${encodeURIComponent(sessionId)}`);
     const d1AfterDigest = digestBuffer(
@@ -1339,15 +1430,20 @@ async function exportCloud(
         elapsed_ms: Date.now() - startedAt,
       },
     };
-    await finalizeBackupArchive(writer, writing, temporary, manifest);
-    renameSync(temporary, options.output);
+    await finalizeBackupArchive(writer, writing, temporary, manifest, signal);
+    await lease.stop(control?.keepLock);
+    signal.throwIfAborted();
     if (!control?.keepLock) {
-      await client.json("/transfer/complete-export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
+      await withTransferTimeout((signal) =>
+        client.json("/transfer/complete-export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+          signal,
+        }),
+      );
     }
+    renameSync(temporary, options.output);
     completed = true;
     return {
       ...manifest,
@@ -1356,8 +1452,27 @@ async function exportCloud(
         elapsed_ms: Date.now() - startedAt,
       },
     };
+  } catch (error) {
+    lease?.abort(error);
+    throw lease?.signal.reason ?? error;
   } finally {
-    if (!completed) rmSync(temporary, { force: true });
+    await lease?.stop();
+    if (!completed) {
+      if (writing) await Promise.allSettled([writing]);
+      await rm(temporary, { force: true }).catch(() => {});
+      if (acquired) {
+        // The endpoint checks both caller ownership and the export session ID.
+        // Cleanup has its own signal: the export signal is already aborted.
+        await withTransferTimeout((signal) =>
+          client.json("/transfer/complete-export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+            signal,
+          }),
+        ).catch(() => {});
+      }
+    }
   }
 }
 
