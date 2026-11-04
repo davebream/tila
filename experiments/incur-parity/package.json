@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "incur": "0.7.0",
-    "zod": "4.6.5",
+    "zod": "4.6.7",
     "tsx": "4.23.15",
     "@modelcontextprotocol/sdk": "1.32.1"
   }
